@@ -1,0 +1,22 @@
+[package]
+name = "assay"
+version = "0.1.0"
+edition = "2021"
+authors = ["Michael Gattozzi <self@mgattozzi.dev>"]
+description = "A super powered testing macro for Rust"
+documentation = "https://docs.rs/assay"
+readme = "README.md"
+repository = "https//github.com/mgattozzi/assay"
+license = "MPL-2.0"
+keywords = ["proc-macro", "test", "testing"]
+categories = ["development-tools", "development-tools::testing"]
+
+[dependencies]
+assay-proc-macro = { path = "assay-proc-macro", version = "0.1.0" }
+pretty_assertions = "^1.0.0"
+rusty-fork = "^0.3.0"
+tempdir = "^0.3.7"
+tokio = { version = "^1.16.0", features = ["rt-multi-thread"] }
+
+[workspace]
+members = ["assay-proc-macro"]
