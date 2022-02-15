@@ -27,7 +27,7 @@ fn basic_usage() {
   fs::write("test", "This is a test")?;
   assert_eq!(
     "This is a test",
-    &fs::read_to_string("test")?;
+    &fs::read_to_string("test")?
   );
 }
 ```
