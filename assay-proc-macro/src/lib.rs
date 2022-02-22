@@ -188,7 +188,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
         fn child() {
           #[allow(unreachable_code)]
           if let Err(e) = || -> Result<(), Box<dyn std::error::Error>> {
-            use assay::{assert_eq, assert_ne};
+            use assay::{assert_eq, assert_eq_sorted, assert_ne};
             #include
             #setup
             #env
