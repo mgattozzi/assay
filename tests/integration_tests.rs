@@ -6,8 +6,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use assay::assay;
+use assay::{assay, assert_eq_sorted};
 use std::{
+  collections::HashMap,
   env, fs,
   future::Future,
   path::PathBuf,
@@ -34,6 +35,15 @@ fn private_2() {
 fn include() {
   assert!(fs::metadata("src/lib.rs")?.is_file());
   assert!(fs::metadata("Cargo.toml")?.is_file());
+}
+
+#[assay(should_panic)]
+fn hash_map_comparison() {
+  let map1: HashMap<String, u8> = (0..5).map(|n| (n.to_string(), n)).collect();
+  let mut map2: HashMap<String, u8> = (0..5).map(|n| (n.to_string(), n)).collect();
+  // Force the last item to be different
+  map2.insert("4".to_string(), 5);
+  assert_eq_sorted!(map1, map2);
 }
 
 #[assay]
