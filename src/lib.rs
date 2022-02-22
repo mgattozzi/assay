@@ -18,7 +18,7 @@
 
 pub use assay_proc_macro::assay;
 #[doc(hidden)]
-pub use pretty_assertions::{assert_eq, assert_ne};
+pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 #[doc(hidden)]
 pub use rusty_fork::{fork, rusty_fork_id, rusty_fork_test_name, ChildWrapper};
 #[doc(hidden)]
