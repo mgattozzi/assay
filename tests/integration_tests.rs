@@ -146,7 +146,7 @@ fn setup_func_2() {
 struct ReadyOnPoll;
 impl Future for ReadyOnPoll {
   type Output = ();
-  fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+  fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
     Poll::Ready(())
   }
 }
