@@ -38,8 +38,8 @@ enters the picture. It seeks to solve a few problems when testing in rust:
 - Making all of your tests act as if they returned
   `Result<(), Box<dyn std::error::Error>>`. Use the `?` to your hearts content
   and no need to add the Eye of Sauron (`Ok(())`) to each test
-- Automatically importing the `pretty_assertions` crate so that you can have
-  pretty output for `assert_eq` and `assert_ne`
+- Automatically importing the `pretty_assertions_sorted` crate so that you can have
+  pretty output for `assert_eq`, `assert_eq_sorted`, and `assert_ne`.
 - Allowing you to define setup and teardown functions to call for the test
 
 `assay` was born out of personal frustration with the way things are and wanting
