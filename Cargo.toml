@@ -15,7 +15,7 @@ categories = ["development-tools", "development-tools::testing"]
 assay-proc-macro = { path = "assay-proc-macro", version = "0.1.0" }
 pretty_assertions = "^1.0.0"
 rusty-fork = "^0.3.0"
-tempdir = "^0.3.7"
+tempfile = "3.2.0"
 tokio = { version = "^1.16.0", features = ["rt-multi-thread"] }
 
 [workspace]
