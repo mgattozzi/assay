@@ -30,7 +30,7 @@ use std::{
   fs::{copy, create_dir_all},
   path::{Component, Path, PathBuf},
 };
-use tempdir::TempDir;
+use tempfile::{Builder, TempDir};
 
 #[doc(hidden)]
 pub struct PrivateFS {
@@ -41,7 +41,7 @@ pub struct PrivateFS {
 impl PrivateFS {
   pub fn new() -> Result<Self, Box<dyn Error>> {
     let ran_from = env::current_dir()?;
-    let directory = TempDir::new("private")?;
+    let directory = Builder::new().prefix("private").tempdir()?;
     env::set_current_dir(directory.path())?;
     Ok(Self {
       ran_from,
