@@ -1,6 +1,6 @@
 [package]
 name = "assay-proc-macro"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Michael Gattozzi <self@mgattozzi.dev>"]
 edition = "2021"
 description = "A super powered testing macro for Rust"
