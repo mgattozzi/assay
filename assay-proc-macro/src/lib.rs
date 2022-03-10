@@ -200,10 +200,10 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
           }
         }
 
-      if std::env::var("NEXTEST")
+      if std::env::var("NEXTEST_EXECUTION_MODE")
         .ok()
         .as_ref()
-        .map(|s| s.as_str() == "1")
+        .map(|s| s.as_str() == "process-per-test")
         .unwrap_or(false)
       {
         child();
