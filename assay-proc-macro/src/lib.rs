@@ -161,12 +161,14 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let asyncness = sig.asyncness.take();
   let block = func.block;
   let body = if asyncness.is_some() {
+    #[cfg(not(feature = "async"))]
+    compile_error!("You cannot use the async functionality in `assay` without specifiying a runtime. This error is occurring because you turned off the default features. Possible feature values are:\n- async-tokio-runtime\n- async-std-runtime");
     quote! {
       async fn inner_async() -> Result<(), Box<dyn std::error::Error>> {
         #block
         Ok(())
       }
-      assay::Runtime::new()?.block_on(inner_async())?;
+      assay::async_runtime::Runtime::block_on(inner_async())??;
     }
   } else {
     quote! { #block }

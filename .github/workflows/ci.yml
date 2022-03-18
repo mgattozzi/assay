@@ -25,11 +25,21 @@ jobs:
           override: true
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
-      - name: Lint (clippy)
+      - name: Lint (clippy) async-std
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-features --all-targets
+          args: --no-default-features --features async-std-runtime --all-targets
+      - name: Lint (clippy) tokio
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --no-default-features --features async-tokio-runtime --all-targets
+      - name: Lint (clippy) default
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --all-targets
       - name: Lint (rustfmt)
         uses: actions-rs/cargo@v1
         with:
@@ -56,24 +66,54 @@ jobs:
           toolchain: ${{ matrix.rust-version }}
           override: true
       - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
-      # cargo test
-      - name: Build all targets with all features
+      # cargo build
+      - name: Build all targets with default features
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --all-targets --all-features
-      - name: Test with cargo test
+          args: --all-targets
+      - name: Build all targets with async-std
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all-targets --no-default-features --features async-std-runtime
+      - name: Build all targets with tokio
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all-targets --no-default-features --features async-tokio-runtime
+      - name: Test async-std with cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all-features --workspace
+          args: --workspace --no-default-features --features async-std-runtime
+      - name: Test tokio with cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace --no-default-features --features async-tokio-runtime
+      - name: Test defaults with cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace
       # cargo nextest
       - name: Install nextest from crates.io
         uses: baptiste0928/cargo-install@v1
         with:
           crate: cargo-nextest
-      - name: Test with nextest from crates.io
+      - name: Test async-std with nextest from crates.io
         uses: actions-rs/cargo@v1
         with:
           command: nextest
-          args: run --all-features
+          args: run --no-default-features --features async-std-runtime
+      - name: Test tokio with nextest from crates.io
+        uses: actions-rs/cargo@v1
+        with:
+          command: nextest
+          args: run --no-default-features --features async-tokio-runtime
+      - name: Test defaults with nextest from crates.io
+        uses: actions-rs/cargo@v1
+        with:
+          command: nextest
+          args: run
