@@ -21,8 +21,6 @@ pub use assay_proc_macro::assay;
 pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 #[doc(hidden)]
 pub use rusty_fork::{fork, rusty_fork_id, rusty_fork_test_name, ChildWrapper};
-#[doc(hidden)]
-pub use tokio::runtime::Runtime;
 
 use std::{
   env,
@@ -84,5 +82,23 @@ impl PrivateFS {
     copy(inner_path, dir.join(relative))?;
 
     Ok(())
+  }
+}
+
+// Async functionality
+#[doc(hidden)]
+#[cfg(any(feature = "async-tokio-runtime", feature = "async-std-runtime"))]
+pub mod async_runtime {
+  use std::{error::Error, future::Future};
+  pub struct Runtime;
+  impl Runtime {
+    #[cfg(feature = "async-tokio-runtime")]
+    pub fn block_on<F: Future>(fut: F) -> Result<F::Output, Box<dyn Error>> {
+      Ok(tokio::runtime::Runtime::new()?.block_on(fut))
+    }
+    #[cfg(feature = "async-std-runtime")]
+    pub fn block_on<F: Future>(fut: F) -> Result<F::Output, Box<dyn Error>> {
+      Ok(async_std::task::block_on(fut))
+    }
   }
 }

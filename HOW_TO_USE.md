@@ -15,6 +15,23 @@ Then importing the macro for your tests:
 use assay::assay;
 ```
 
+This setup will by default turn on the ability for `async` tests using `tokio`, if you wish to turn
+it off to cut down on dependencies then you can do the following:
+
+```toml
+[dev-dependencies]
+assay = {version = "0.1.0", no-default-features = true }
+```
+
+`assay` also supports using the `async-std` runtime if you prefer instead of
+`tokio` which can be enabled as such:
+
+```toml
+[dev-dependencies]
+assay = {version = "0.1.0", no-default-features = true, features =
+"async-std-runtime" }
+```
+
 ### Basic Usage & Automatic Niceties
 
 Just putting on the `#[assay]` attribute is the easiest way to get started:
@@ -108,8 +125,9 @@ fn panic_test() {
 
 ### `async` tests
 If you want your tests to run `async` code all you need to do is specify that the
-test is `async`. Note this won't let you control the runtime currently. `assay` only
-uses the default `tokio` executor.
+test is `async`. `assay` defaults to using `tokio` as the executor, but can use `async-std`.
+Note: you cannot use the `async` functionality if `no-default-features` is enabled in your
+`Cargo.toml` with no specified runtime.
 
 ```rust
 use assay::assay;
