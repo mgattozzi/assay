@@ -31,10 +31,11 @@ fn private_2() {
   assert_eq!("This is a test\nprivate 2\n", &fs::read_to_string("test")?);
 }
 
-#[assay(include = ["Cargo.toml", "src/lib.rs"])]
+#[assay(include = ["Cargo.toml", "src/lib.rs", ("HOW_TO_USE.md", "docs/GUIDE.md")])]
 fn include() {
   assert!(fs::metadata("lib.rs")?.is_file());
   assert!(fs::metadata("Cargo.toml")?.is_file());
+  assert!(fs::metadata("docs/GUIDE.md")?.is_file());
 }
 
 #[assay(should_panic)]
