@@ -14,7 +14,7 @@ use syn::{
 };
 
 struct AssayAttribute {
-  include: Option<Vec<String>>,
+  include: Option<Vec<(String, Option<String>)>>,
   should_panic: bool,
   env: Option<Vec<(String, String)>>,
   setup: Option<Expr>,
@@ -48,7 +48,27 @@ impl Parse for AssayAttribute {
                 Expr::Lit(ExprLit {
                   lit: Lit::Str(lit_str),
                   ..
-                }) => Some(lit_str.value()),
+                }) => {
+                  let value = lit_str.value();
+                  Some((value, None))
+                },
+                Expr::Tuple(tuple) => {
+                  let mut elements = Vec::new();
+                  for e in tuple.elems.into_iter() {
+                    if let Expr::Lit(ExprLit { lit: Lit::Str(lit_str), ..}) = e {
+                      elements.push(lit_str.value());
+                    } else {
+                      // TODO: Should we return a parsing error to the user here? How?
+                      return None;
+                    }
+                  }
+                  if elements.len() == 2 {
+                    Some((elements[0].clone(), Some(elements[1].clone())))
+                  } else {
+                    // TODO: Should we return a parsing error to the user here? How?
+                    None
+                  }
+                }
                 _ => None,
               })
               .collect(),
@@ -112,10 +132,14 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut out = quote! {
       let fs = assay::PrivateFS::new()?;
     };
-    for file in include {
+    for (source_path, destination_path) in include {
+      let destination_fragment = match destination_path {
+        None => quote!(std::option::Option::None),
+        Some(p) => quote!(std::option::Option::Some(#p))
+      };
       out = quote! {
         #out
-        fs.include(#file)?;
+        fs.include(#source_path, #destination_fragment)?;
       };
     }
     out

@@ -28,6 +28,7 @@ use std::{
   fs::{copy},
   path::{Path, PathBuf},
 };
+use std::fs::create_dir_all;
 use tempfile::{Builder, TempDir};
 
 #[doc(hidden)]
@@ -47,25 +48,45 @@ impl PrivateFS {
     })
   }
 
-  pub fn include(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+  pub fn include(&self, source_path: impl AsRef<Path>, destination_path: Option<&str>) -> Result<(), Box<dyn Error>> {
     // Get our pathbuf to the file to include
-    let mut inner_path = path.as_ref().to_owned();
+    let mut inner_path = source_path.as_ref().to_owned();
 
     // If the path given is not absolute then it's relative to the dir we
     // ran the test from
     let is_relative = inner_path.is_relative();
     if is_relative {
-      inner_path = self.ran_from.join(&path);
+      inner_path = self.ran_from.join(&source_path);
     }
 
     // Get our working directory
     let dir = self.directory.path().to_owned();
 
+    let destination_path = match destination_path {
+      None => {
+        // If the destination path is unspecified, we mount the file in the root directory
+        // of the test's private filesystem
+        // TODO: return meaningful error message
+        let filename = inner_path.file_name().unwrap().to_owned();
+        dir.join(filename)
+      },
+      Some(p) => {
+        let p = PathBuf::from(p);
+        if !p.is_relative() {
+          // TODO: do we want to panic here?
+          panic!("The destination path for included files must be a relative path. {:?} isn't.", p);
+        }
+        // If the relative path to the file includes parent directories create
+        // them
+        if let Some(parent) = p.parent() {
+          create_dir_all(dir.join(parent))?;
+        }
+        dir.join(p)
+      }
+    };
+
     // Copy the file over from the file system into the temp file system
-    // We mount all included files in the root directory of the test's private filesystem
-    // TODO: return meaningful error message
-    let filename = inner_path.file_name().unwrap().to_owned();
-    copy(inner_path, dir.join(filename))?;
+    copy(inner_path, destination_path)?;
 
     Ok(())
   }

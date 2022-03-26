@@ -96,7 +96,7 @@ fn setup_teardown_test_2() {
 
 #[assay(
   setup = setup_func_2(),
-  include = ["Cargo.toml", "src/lib.rs"],
+  include = ["Cargo.toml", ("src/lib.rs", "src/lib.rs")],
   env = [
     ("GOODBOY", "Bukka"),
     ("BADDOGS", "false")
@@ -111,7 +111,7 @@ async fn one_test_to_call_it_all() {
   assert_eq!(env::var("BADDOGS")?, "false");
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
   assert!(PathBuf::from("Cargo.toml").exists());
-  assert!(PathBuf::from("lib.rs").exists());
+  assert!(PathBuf::from("src/lib.rs").exists());
 
   // Removing this actually causes the test to fail
   panic!();
