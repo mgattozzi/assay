@@ -25,8 +25,8 @@ pub use rusty_fork::{fork, rusty_fork_id, rusty_fork_test_name, ChildWrapper};
 use std::{
   env,
   error::Error,
-  fs::{copy, create_dir_all},
-  path::{Component, Path, PathBuf},
+  fs::{copy},
+  path::{Path, PathBuf},
 };
 use tempfile::{Builder, TempDir};
 
@@ -61,25 +61,11 @@ impl PrivateFS {
     // Get our working directory
     let dir = self.directory.path().to_owned();
 
-    // Make the relative path of the file in relation to our temp file
-    // system based on if it was absolute or not
-    let relative = if !is_relative {
-      inner_path
-        .components()
-        .filter(|c| *c != Component::RootDir)
-        .collect::<PathBuf>()
-    } else {
-      path.as_ref().into()
-    };
-
-    // If the relative path to the file includes parent directories create
-    // them
-    if let Some(parent) = relative.parent() {
-      create_dir_all(dir.join(parent))?;
-    }
-
     // Copy the file over from the file system into the temp file system
-    copy(inner_path, dir.join(relative))?;
+    // We mount all included files in the root directory of the test's private filesystem
+    // TODO: return meaningful error message
+    let filename = inner_path.file_name().unwrap().to_owned();
+    copy(inner_path, dir.join(filename))?;
 
     Ok(())
   }
