@@ -31,10 +31,11 @@ fn private_2() {
   assert_eq!("This is a test\nprivate 2\n", &fs::read_to_string("test")?);
 }
 
-#[assay(include = ["Cargo.toml", "src/lib.rs"])]
+#[assay(include = ["Cargo.toml", "src/lib.rs", ("HOW_TO_USE.md", "docs/GUIDE.md")])]
 fn include() {
-  assert!(fs::metadata("src/lib.rs")?.is_file());
+  assert!(fs::metadata("lib.rs")?.is_file());
   assert!(fs::metadata("Cargo.toml")?.is_file());
+  assert!(fs::metadata("docs/GUIDE.md")?.is_file());
 }
 
 #[assay(should_panic)]
@@ -95,7 +96,7 @@ fn setup_teardown_test_2() {
 
 #[assay(
   setup = setup_func_2(),
-  include = ["Cargo.toml", "src/lib.rs"],
+  include = ["Cargo.toml", ("src/lib.rs", "src/lib.rs")],
   env = [
     ("GOODBOY", "Bukka"),
     ("BADDOGS", "false")
@@ -133,7 +134,7 @@ async fn one_test_to_call_it_all_2() {
   assert_eq!(env::var("BADDOGS")?, "false");
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
   assert!(PathBuf::from("Cargo.toml").exists());
-  assert!(PathBuf::from("src/lib.rs").exists());
+  assert!(PathBuf::from("lib.rs").exists());
 
   // Removing this actually causes the test to fail
   panic!();

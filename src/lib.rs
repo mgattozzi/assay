@@ -22,11 +22,12 @@ pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 #[doc(hidden)]
 pub use rusty_fork::{fork, rusty_fork_id, rusty_fork_test_name, ChildWrapper};
 
+use std::fs::create_dir_all;
 use std::{
   env,
   error::Error,
-  fs::{copy, create_dir_all},
-  path::{Component, Path, PathBuf},
+  fs::copy,
+  path::{Path, PathBuf},
 };
 use tempfile::{Builder, TempDir};
 
@@ -47,39 +48,68 @@ impl PrivateFS {
     })
   }
 
-  pub fn include(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+  pub fn include<S, D>(
+    &self,
+    source_path: S,
+    destination_path: Option<D>,
+  ) -> Result<(), Box<dyn Error>>
+  where
+    S: AsRef<Path>,
+    D: AsRef<Path>,
+  {
     // Get our pathbuf to the file to include
-    let mut inner_path = path.as_ref().to_owned();
+    let mut inner_path = source_path.as_ref().to_owned();
 
     // If the path given is not absolute then it's relative to the dir we
     // ran the test from
     let is_relative = inner_path.is_relative();
     if is_relative {
-      inner_path = self.ran_from.join(&path);
+      inner_path = self.ran_from.join(&source_path);
+    }
+
+    if !inner_path.is_file() {
+      panic!(
+        "The source path passed to `#[include()]` must point to a file. {:?} is not a file.",
+        inner_path
+      );
     }
 
     // Get our working directory
     let dir = self.directory.path().to_owned();
 
-    // Make the relative path of the file in relation to our temp file
-    // system based on if it was absolute or not
-    let relative = if !is_relative {
-      inner_path
-        .components()
-        .filter(|c| *c != Component::RootDir)
-        .collect::<PathBuf>()
-    } else {
-      path.as_ref().into()
+    let destination_path = match destination_path {
+      None => {
+        // If the destination path is unspecified, we mount the file in the root directory
+        // of the test's private filesystem
+        match inner_path.file_name() {
+          Some(filename) => dir.join(filename),
+          None => {
+            panic!(
+              "Failed to extract the filename from the source path, {:?}.",
+              inner_path
+            )
+          }
+        }
+      }
+      Some(p) => {
+        let p = p.as_ref();
+        if !p.is_relative() {
+          panic!(
+            "The destination path for included files must be a relative path. {:?} isn't.",
+            p
+          );
+        }
+        // If the relative path to the file includes parent directories create
+        // them
+        if let Some(parent) = p.parent() {
+          create_dir_all(dir.join(parent))?;
+        }
+        dir.join(p)
+      }
     };
 
-    // If the relative path to the file includes parent directories create
-    // them
-    if let Some(parent) = relative.parent() {
-      create_dir_all(dir.join(parent))?;
-    }
-
     // Copy the file over from the file system into the temp file system
-    copy(inner_path, dir.join(relative))?;
+    copy(inner_path, destination_path)?;
 
     Ok(())
   }
