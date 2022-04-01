@@ -51,11 +51,15 @@ impl Parse for AssayAttribute {
                 }) => {
                   let value = lit_str.value();
                   Some((value, None))
-                },
+                }
                 Expr::Tuple(tuple) => {
                   let mut elements = Vec::new();
                   for e in tuple.elems.into_iter() {
-                    if let Expr::Lit(ExprLit { lit: Lit::Str(lit_str), ..}) = e {
+                    if let Expr::Lit(ExprLit {
+                      lit: Lit::Str(lit_str),
+                      ..
+                    }) = e
+                    {
                       elements.push(lit_str.value());
                     } else {
                       // TODO: Should we return a parsing error to the user here? How?
@@ -134,8 +138,8 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     for (source_path, destination_path) in include {
       let destination_fragment = match destination_path {
-        None => quote!(std::option::Option::None),
-        Some(p) => quote!(std::option::Option::Some(#p))
+        None => quote!(std::option::Option::<::std::path::PathBuf>::None),
+        Some(p) => quote!(std::option::Option::Some(#p)),
       };
       out = quote! {
         #out

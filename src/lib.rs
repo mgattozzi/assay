@@ -22,13 +22,13 @@ pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 #[doc(hidden)]
 pub use rusty_fork::{fork, rusty_fork_id, rusty_fork_test_name, ChildWrapper};
 
+use std::fs::create_dir_all;
 use std::{
   env,
   error::Error,
-  fs::{copy},
+  fs::copy,
   path::{Path, PathBuf},
 };
-use std::fs::create_dir_all;
 use tempfile::{Builder, TempDir};
 
 #[doc(hidden)]
@@ -48,7 +48,11 @@ impl PrivateFS {
     })
   }
 
-  pub fn include(&self, source_path: impl AsRef<Path>, destination_path: Option<&str>) -> Result<(), Box<dyn Error>> {
+  pub fn include<S, D>(&self, source_path: S, destination_path: Option<D>) -> Result<(), Box<dyn Error>>
+  where
+    S: AsRef<Path>,
+    D: AsRef<Path>,
+  {
     // Get our pathbuf to the file to include
     let mut inner_path = source_path.as_ref().to_owned();
 
@@ -69,12 +73,14 @@ impl PrivateFS {
         // TODO: return meaningful error message
         let filename = inner_path.file_name().unwrap().to_owned();
         dir.join(filename)
-      },
+      }
       Some(p) => {
-        let p = PathBuf::from(p);
+        let p = p.as_ref();
         if !p.is_relative() {
-          // TODO: do we want to panic here?
-          panic!("The destination path for included files must be a relative path. {:?} isn't.", p);
+          panic!(
+            "The destination path for included files must be a relative path. {:?} isn't.",
+            p
+          );
         }
         // If the relative path to the file includes parent directories create
         // them
