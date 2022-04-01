@@ -48,7 +48,11 @@ impl PrivateFS {
     })
   }
 
-  pub fn include<S, D>(&self, source_path: S, destination_path: Option<D>) -> Result<(), Box<dyn Error>>
+  pub fn include<S, D>(
+    &self,
+    source_path: S,
+    destination_path: Option<D>,
+  ) -> Result<(), Box<dyn Error>>
   where
     S: AsRef<Path>,
     D: AsRef<Path>,
@@ -63,6 +67,13 @@ impl PrivateFS {
       inner_path = self.ran_from.join(&source_path);
     }
 
+    if !inner_path.is_file() {
+      panic!(
+        "The source path passed to `#[include()]` must point to a file. {:?} is not a file.",
+        inner_path
+      );
+    }
+
     // Get our working directory
     let dir = self.directory.path().to_owned();
 
@@ -70,9 +81,15 @@ impl PrivateFS {
       None => {
         // If the destination path is unspecified, we mount the file in the root directory
         // of the test's private filesystem
-        // TODO: return meaningful error message
-        let filename = inner_path.file_name().unwrap().to_owned();
-        dir.join(filename)
+        match inner_path.file_name() {
+          Some(filename) => dir.join(filename),
+          None => {
+            panic!(
+              "Failed to extract the filename from the source path, {:?}.",
+              inner_path
+            )
+          }
+        }
       }
       Some(p) => {
         let p = p.as_ref();
