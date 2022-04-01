@@ -62,14 +62,12 @@ impl Parse for AssayAttribute {
                     {
                       elements.push(lit_str.value());
                     } else {
-                      // TODO: Should we return a parsing error to the user here? How?
                       return None;
                     }
                   }
                   if elements.len() == 2 {
                     Some((elements[0].clone(), Some(elements[1].clone())))
                   } else {
-                    // TODO: Should we return a parsing error to the user here? How?
                     None
                   }
                 }
