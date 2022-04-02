@@ -165,6 +165,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
 
   // Parse the function out into individual parts
   let func = parse_macro_input!(item as ItemFn);
+  let attrs = func.attrs;
   let vis = func.vis;
   let mut sig = func.sig;
   let name = sig.ident.clone();
@@ -188,6 +189,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
       #[test]
       #should_panic
       #ignore
+      #(#attrs)*
       #vis #sig {
         fn modify(_: &mut std::process::Command) {}
 
