@@ -160,3 +160,14 @@ impl Future for ReadyOnPoll {
     Poll::Ready(())
   }
 }
+
+#[assay(ignore)]
+fn should_be_ignored() {
+  panic!("this test should be ignored")
+}
+
+#[assay]
+#[should_panic]
+fn respects_other_attributes() {
+  panic!("this test is expected to panic");
+}

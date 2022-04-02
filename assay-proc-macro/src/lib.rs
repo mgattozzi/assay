@@ -16,6 +16,7 @@ use syn::{
 struct AssayAttribute {
   include: Option<Vec<String>>,
   should_panic: bool,
+  ignore: bool,
   env: Option<Vec<(String, String)>>,
   setup: Option<Expr>,
   teardown: Option<Expr>,
@@ -25,6 +26,7 @@ impl Parse for AssayAttribute {
   fn parse(input: ParseStream) -> Result<Self> {
     let mut include = None;
     let mut should_panic = false;
+    let mut ignore = false;
     let mut env = None;
     let mut setup = None;
     let mut teardown = None;
@@ -55,6 +57,7 @@ impl Parse for AssayAttribute {
           );
         }
         "should_panic" => should_panic = true,
+        "ignore" => ignore = true,
         "env" => {
           let _: Token![=] = input.parse()?;
           let array: ExprArray = input.parse()?;
@@ -97,6 +100,7 @@ impl Parse for AssayAttribute {
     Ok(AssayAttribute {
       include,
       should_panic,
+      ignore,
       env,
       setup,
       teardown,
@@ -131,6 +135,12 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {}
   };
 
+  let ignore = if attr.ignore {
+    quote! { #[ignore] }
+  } else {
+    quote! {}
+  };
+
   let env = if let Some(env) = attr.env {
     let mut out = quote! {};
     for (k, v) in env {
@@ -155,6 +165,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
 
   // Parse the function out into individual parts
   let func = parse_macro_input!(item as ItemFn);
+  let attrs = func.attrs;
   let vis = func.vis;
   let mut sig = func.sig;
   let name = sig.ident.clone();
@@ -177,6 +188,8 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let expanded = quote! {
       #[test]
       #should_panic
+      #ignore
+      #(#attrs)*
       #vis #sig {
         fn modify(_: &mut std::process::Command) {}
 
