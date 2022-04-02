@@ -160,3 +160,8 @@ impl Future for ReadyOnPoll {
     Poll::Ready(())
   }
 }
+
+#[assay(ignore)]
+fn should_be_ignored() {
+  panic!("this test should be ignored")
+}
