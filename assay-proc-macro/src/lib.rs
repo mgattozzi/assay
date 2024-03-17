@@ -15,6 +15,7 @@ use syn::{
 
 struct AssayAttribute {
   include: Option<Vec<String>>,
+  ignore: bool,
   should_panic: bool,
   env: Option<Vec<(String, String)>>,
   setup: Option<Expr>,
@@ -24,6 +25,7 @@ struct AssayAttribute {
 impl Parse for AssayAttribute {
   fn parse(input: ParseStream) -> Result<Self> {
     let mut include = None;
+    let mut ignore = false;
     let mut should_panic = false;
     let mut env = None;
     let mut setup = None;
@@ -55,6 +57,7 @@ impl Parse for AssayAttribute {
           );
         }
         "should_panic" => should_panic = true,
+        "ignore" => ignore = true,
         "env" => {
           let _: Token![=] = input.parse()?;
           let array: ExprArray = input.parse()?;
@@ -96,6 +99,7 @@ impl Parse for AssayAttribute {
 
     Ok(AssayAttribute {
       include,
+      ignore,
       should_panic,
       env,
       setup,
@@ -123,6 +127,12 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
       let fs = assay::PrivateFS::new()?;
     }
+  };
+
+  let ignore = if attr.ignore {
+    quote! { #[ignore] }
+  } else {
+    quote! {}
   };
 
   let should_panic = if attr.should_panic {
@@ -177,29 +187,17 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let expanded = quote! {
       #[test]
       #should_panic
+      #ignore
       #vis #sig {
-        fn modify(_: &mut std::process::Command) {}
-
-        fn parent(child: &mut assay::ChildWrapper, _: &mut std::fs::File) {
-          let child = child.wait().unwrap();
-          if !child.success() {
-              panic!("Assay test failed")
-          }
-        }
-
-        fn child() {
-          #[allow(unreachable_code)]
-          if let Err(e) = || -> Result<(), Box<dyn std::error::Error>> {
-            use assay::{assert_eq, assert_eq_sorted, assert_ne};
-            #include
-            #setup
-            #env
-            #body
-            #teardown
-            Ok(())
-          }() {
-            panic!("Error: {}", e);
-          }
+        #[allow(unreachable_code)]
+        fn child() -> Result<(), Box<dyn std::error::Error>> {
+          use assay::{assert_eq, assert_eq_sorted, assert_ne};
+          #include
+          #setup
+          #env
+          #body
+          #teardown
+          Ok(())
         }
 
       if std::env::var("NEXTEST_EXECUTION_MODE")
@@ -208,7 +206,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|s| s.as_str() == "process-per-test")
         .unwrap_or(false)
       {
-        child();
+        child().unwrap();
       } else {
         let name = {
           let mut module = module_path!()
@@ -219,14 +217,27 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
           module.push(stringify!(#name));
           module.join("::")
         };
-
-        assay::fork(
-            &name,
-            assay::rusty_fork_id!(),
-            modify,
-            parent,
-            child
-        ).expect("We forked the test using assay");
+        if std::env::var("ASSAY_SPLIT")
+            .as_ref()
+            .map(|s| s.as_str() != "1")
+            .unwrap_or(true)
+        {
+          let mut args = std::env::args().collect::<Vec<String>>();
+          if !args.contains(&name) {
+            args.push(name.clone());
+          }
+          let out = std::process::Command::new(&args[0])
+            .args(if args.len() == 1 { &[] } else { &args[1..] })
+            .env("ASSAY_SPLIT", "1")
+            .output()
+            .expect("executed a subprocess");
+          let stdout = String::from_utf8(out.stdout).unwrap();
+          if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
+            panic!();
+          }
+        } else{
+          child().unwrap();
+        }
       }
     }
   };

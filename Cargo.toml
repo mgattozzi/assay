@@ -13,11 +13,10 @@ categories = ["development-tools", "development-tools::testing"]
 
 [dependencies]
 assay-proc-macro = { path = "assay-proc-macro", version = "0.1.0", default-features = false }
-async-std = { version = "^1.10.0", optional = true }
-pretty_assertions_sorted = "^1.0.0"
-rusty-fork = "^0.3.0"
-tempfile = "3.2.0"
-tokio = { version = "^1.16.0", features = ["rt-multi-thread"], optional = true }
+async-std = { version = "^1.13.0", optional = true }
+pretty_assertions_sorted = "^1.2.3"
+tempfile = "3.14.0"
+tokio = { version = "^1.41.1", features = ["rt-multi-thread"], optional = true }
 
 [workspace]
 members = ["assay-proc-macro"]
