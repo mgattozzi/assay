@@ -233,7 +233,16 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
             .expect("executed a subprocess");
           let stdout = String::from_utf8(out.stdout).unwrap();
           if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
-            panic!();
+            let stdout_line = format!("---- {name} stdout ----");
+            let split = stdout
+              .lines()
+              .skip_while(|line| line != &stdout_line)
+              .skip(1)
+              .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
+              .collect::<Vec<&str>>()
+              .join("\n");
+            assay::panic_replace();
+            panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{split}")
           }
         } else{
           child().unwrap();
