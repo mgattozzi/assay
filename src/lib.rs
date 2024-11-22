@@ -24,9 +24,39 @@ use std::{
   env,
   error::Error,
   fs::{copy, create_dir_all},
+  panic,
   path::{Component, Path, PathBuf},
+  sync::OnceLock,
 };
 use tempfile::{Builder, TempDir};
+
+#[doc(hidden)]
+pub static PANIC_HOOK_REPLACE: OnceLock<()> = OnceLock::new();
+#[doc(hidden)]
+pub fn panic_replace() {
+  const HEADER: &str = "ASSAY_PANIC_INTERNAL_MESSAGE\n";
+  PANIC_HOOK_REPLACE.get_or_init(|| {
+    let default = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+      let msg = panic_info
+        .payload()
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| {
+          panic_info
+            .payload()
+            .downcast_ref::<String>()
+            .map(|s| s.to_owned())
+        })
+        .unwrap_or_default();
+      if let Some(message) = msg.strip_prefix(HEADER) {
+        println!("{}", message.trim());
+      } else {
+        default(panic_info);
+      }
+    }))
+  });
+}
 
 #[doc(hidden)]
 pub struct PrivateFS {
