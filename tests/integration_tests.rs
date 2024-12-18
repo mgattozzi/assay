@@ -139,7 +139,7 @@ async fn one_test_to_call_it_all_2() {
   panic!();
 }
 
-fn setup_func(input: i32) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_func(input: i32) -> assay::Result<()> {
   fs::write("setup", format!("Value: {}", input))?;
   Ok(())
 }

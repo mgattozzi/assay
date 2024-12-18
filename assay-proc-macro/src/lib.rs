@@ -174,7 +174,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     #[cfg(not(feature = "async"))]
     compile_error!("You cannot use the async functionality in `assay` without specifiying a runtime. This error is occurring because you turned off the default features. Possible feature values are:\n- async-tokio-runtime\n- async-std-runtime");
     quote! {
-      async fn inner_async() -> Result<(), Box<dyn std::error::Error>> {
+      async fn inner_async() -> assay::Result<()> {
         #block
         Ok(())
       }
@@ -184,13 +184,31 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! { #block }
   };
 
+  let fn_sig = if attr.should_panic {
+    quote! { #vis #sig }
+  } else {
+    quote! { #vis #sig -> assay::Result<()> }
+  };
+
+  let ret = if attr.should_panic {
+    quote! {}
+  } else {
+    quote! { Ok(()) }
+  };
+
+  let child = if attr.should_panic {
+    quote! { child().unwrap() }
+  } else {
+    quote! { child() }
+  };
+
   let expanded = quote! {
       #[test]
       #should_panic
       #ignore
-      #vis #sig {
+      #fn_sig {
         #[allow(unreachable_code)]
-        fn child() -> Result<(), Box<dyn std::error::Error>> {
+        fn child() -> assay::Result<()> {
           use assay::{assert_eq, assert_eq_sorted, assert_ne};
           #include
           #setup
@@ -206,7 +224,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|s| s.as_str() == "process-per-test")
         .unwrap_or(false)
       {
-        child().unwrap();
+        #child
       } else {
         let name = {
           let mut module = module_path!()
@@ -244,8 +262,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
             assay::panic_replace();
             panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{split}")
           }
+          #ret
         } else{
-          child().unwrap();
+          #child
         }
       }
     }

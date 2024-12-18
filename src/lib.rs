@@ -17,18 +17,19 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/HOW_TO_USE.md"))]
 
 pub use assay_proc_macro::assay;
-#[doc(hidden)]
+pub use eyre;
 pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 
 use std::{
   env,
-  error::Error,
   fs::{copy, create_dir_all},
   panic,
   path::{Component, Path, PathBuf},
   sync::OnceLock,
 };
 use tempfile::{Builder, TempDir};
+
+pub type Result<T> = std::result::Result<T, eyre::Report>;
 
 #[doc(hidden)]
 pub static PANIC_HOOK_REPLACE: OnceLock<()> = OnceLock::new();
@@ -65,7 +66,7 @@ pub struct PrivateFS {
 }
 
 impl PrivateFS {
-  pub fn new() -> Result<Self, Box<dyn Error>> {
+  pub fn new() -> Result<Self> {
     let ran_from = env::current_dir()?;
     let directory = Builder::new().prefix("private").tempdir()?;
     env::set_current_dir(directory.path())?;
@@ -75,7 +76,7 @@ impl PrivateFS {
     })
   }
 
-  pub fn include(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+  pub fn include(&self, path: impl AsRef<Path>) -> Result<()> {
     // Get our pathbuf to the file to include
     let mut inner_path = path.as_ref().to_owned();
 
@@ -117,15 +118,16 @@ impl PrivateFS {
 #[doc(hidden)]
 #[cfg(any(feature = "async-tokio-runtime", feature = "async-std-runtime"))]
 pub mod async_runtime {
-  use std::{error::Error, future::Future};
+  use super::Result;
+  use std::future::Future;
   pub struct Runtime;
   impl Runtime {
     #[cfg(feature = "async-tokio-runtime")]
-    pub fn block_on<F: Future>(fut: F) -> Result<F::Output, Box<dyn Error>> {
+    pub fn block_on<F: Future>(fut: F) -> Result<F::Output> {
       Ok(tokio::runtime::Runtime::new()?.block_on(fut))
     }
     #[cfg(feature = "async-std-runtime")]
-    pub fn block_on<F: Future>(fut: F) -> Result<F::Output, Box<dyn Error>> {
+    pub fn block_on<F: Future>(fut: F) -> Result<F::Output> {
       Ok(async_std::task::block_on(fut))
     }
   }
