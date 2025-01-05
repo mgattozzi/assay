@@ -209,7 +209,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
       #fn_sig {
         #[allow(unreachable_code)]
         fn child() -> assay::Result<()> {
-          use assay::{assert_eq, assert_eq_sorted, assert_ne};
+          use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
           #include
           #setup
           #env

@@ -16,6 +16,8 @@
 //!
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/HOW_TO_USE.md"))]
 
+pub mod net;
+
 pub use assay_proc_macro::assay;
 pub use eyre;
 pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
