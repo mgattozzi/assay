@@ -68,10 +68,8 @@ Take a look at [`HOW_TO_USE.md`](HOW_TO_USE.md) (which is included in the crate
 documentation) or [`tests/integration_tests.rs`](tests/integration_tests.rs).
 
 # MSRV Policy
-We do not have a Minimum Supported Rust Version and only track `stable`. Given
-this crate uses 2021 edition `rustc` >= 1.56 for now, but that's not always
-guaranteed to be the case and later versions might require a greater version
-than 1.56.
+We do not have a Minimum Supported Rust Version and only track `stable`. Older
+versions might work, but it's not guaranteed.
 
 # License
 All files within this project are distributed under the Mozilla Public License
