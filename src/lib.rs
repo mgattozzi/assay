@@ -1,20 +1,12 @@
 /*
- * Copyright (C) 2021 Michael Gattozzi <self@mgattozzi.dev>
+ * Copyright (C) 2021 - 2025 Michael Gattozzi <michael@ductile.systems>
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-//! > as·say /ˈaˌsā,aˈsā/ noun - the testing of a metal or ore to determine its ingredients and quality.
-//!
-//! `assay` is a super powered testing macro for Rust. It lets you run test in
-//! parallel while also being their own process so that you can set env vars, or
-//! do other per process kinds of settings without interfering with each other,
-//! auto mounting and changing to a tempdir, including files in it, choosing
-//! setup and tear down functions, async tests, and more!
-//!
-#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/HOW_TO_USE.md"))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
 pub mod net;
 

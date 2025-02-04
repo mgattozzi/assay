@@ -2,6 +2,12 @@
 
 > as·say /ˈaˌsā,aˈsā/ noun - the testing of a metal or ore to determine its ingredients and quality.
 
+`assay` is a super powered testing macro for Rust. It lets you run tests in
+parallel while also being their own process so that you can set env vars, or
+do other per process kinds of settings without interfering with each other,
+auto mounting and changing to a tempdir, including files in it, choosing
+setup and tear down functions, async tests, and more!
+
 Rust is great, but the testing leaves much to be desired sometimes. With custom
 test frameworks being unstable and only an eRFC since 2018 there's not much we
 can do to expand the abilities of our tests right? Well that's where `assay`
@@ -46,26 +52,258 @@ enters the picture. It seeks to solve a few problems when testing in rust:
 to handle the boilerplate without needing to write a whole test framework, while
 also pushing the bounds of what we could have today on stable Rust.
 
+# How to use `assay`
+
+You can get started using `assay` by importing the crate into your `Cargo.toml`'s dev
+dependencies:
+
+```toml
+[dev-dependencies]
+assay = "0.1.0"
+```
+
+Then importing the macro for your tests:
+
+```
+#[cfg(test)]
+use assay::assay;
+```
+
+This setup will by default turn on the ability for `async` tests using `tokio`, if you wish to turn
+it off to cut down on dependencies then you can do the following:
+
+```toml
+[dev-dependencies]
+assay = {version = "0.1.0", no-default-features = true }
+```
+
+`assay` also supports using the `async-std` runtime if you prefer instead of
+`tokio` which can be enabled as such:
+
+```toml
+[dev-dependencies]
+assay = {version = "0.1.0", no-default-features = true, features =
+"async-std-runtime" }
+```
+
+## Basic Usage & Automatic Niceties
+
+Just putting on the `#[assay]` attribute is the easiest way to get started:
+
+```rust
+use assay::assay;
+
+#[assay]
+fn basic_usage() {
+  fs::write("test", "This is a test")?;
+  assert_eq!(
+    "This is a test",
+    &fs::read_to_string("test")?
+  );
+}
+```
+
+This does a few things:
+- Your test is run in a new process so that it does not have env vars or global
+  state changed between tests. This works with both `cargo nextest` and `cargo test`
+  where we fork a new process with the default `cargo test` or if you use
+  `cargo nextest` then it's already run in parallel as it's own process!
+- Is mounted in a temp directory automatically. The above example writes into
+  that directory and it's all removed on test completion.
+- Allows you to use the `?` operator inside of tests by using the catch all
+  `Result<(), Box<dyn std::error::Error>>` return value and it handles adding
+  the `Ok(())` value so you don't need to worry about that either.
+
+This alone is great start but there's more!
+
+## Env Vars
+You can set environment variables for each test individually. Useful if say you
+want to test output at different log levels. The other nice thing is that since
+these run as separate process you won't have race conditions in your test from
+when they are set and when you read them!
+
+```rust
+use assay::assay;
+
+#[assay(
+  env = [
+    ("RUST_LOG", "debug"),
+    ("OTHER", "value")
+  ]
+)]
+fn debug_level() {
+  assert_eq!(env::var("RUST_LOG")?, "debug");
+  assert_eq!(env::var("OTHER")?, "value");
+}
+
+#[assay(
+  env = [
+    ("RUST_LOG", "warn"),
+    ("OTHER", "value")
+  ]
+)]
+fn warn_level() {
+  assert_eq!(env::var("RUST_LOG")?, "warn");
+  assert_eq!(env::var("OTHER")?, "value");
+}
+```
+
+## Include files
+Sometimes you want to include files in your tests and generating them is one
+way, but having it in your version control system and then having them be in
+your tests can also be nice! With the `include` directive you can include files
+in your test's directory when you start running it:
+
+```rust
+use assay::assay;
+
+#[assay(include = ["Cargo.toml", "src/lib.rs"])]
+fn include() {
+  assert!(fs::metadata("src/lib.rs")?.is_file());
+  assert!(fs::metadata("Cargo.toml")?.is_file());
+}
+```
+
+## Panics
+`assay` will also let you mark a test that you expect to panic much like you
+would for a normal Rust test:
+
+```rust
+use assay::assay;
+
+#[assay(should_panic)]
+fn panic_test() {
+  panic!("Panic! At The Proc-Macro");
+}
+```
+
+## `async` tests
+If you want your tests to run `async` code all you need to do is specify that the
+test is `async`. `assay` defaults to using `tokio` as the executor, but can use `async-std`.
+Note: you cannot use the `async` functionality if `no-default-features` is enabled in your
+`Cargo.toml` with no specified runtime.
+
+```rust
+use assay::assay;
+use std::{
+  pin::Pin,
+  future::Future,
+  task::{Poll, Context},
+};
+
+#[assay]
+async fn async_func() {
+  ReadyOnPoll.await;
+}
+
+struct ReadyOnPoll;
+impl Future for ReadyOnPoll {
+  type Output = ();
+  fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+    Poll::Ready(())
+  }
+}
+```
+
+## Setup and Teardown Functions
+
+Sometimes you need to setup the same things all the time and maybe with
+different inputs. You might also need to handle tearing down things in the same
+way. You can define a function call expression like so with `?` support and
+different parameters as input. Just define `setup` or `teardown` in your macro
+with the function you want used before or after the test. Note
+`before_each`/`after_each` support for `assay` does not exist yet as we'd need
+some kind of macro for the file itself to modify the args to `assay`.
+
+```rust
+use assay::assay;
+use std::{
+  env,
+  fs,
+  path::PathBuf,
+};
+
+#[assay(
+  setup = setup_func(5)?,
+  teardown = teardown_func(),
+)]
+fn setup_teardown_test() {
+  assert_eq!(fs::read_to_string("setup")?, "Value: 5");
+}
+
+fn setup_func(input: i32) -> Result<(), Box<dyn std::error::Error>> {
+  fs::write("setup", format!("Value: {}", input))?;
+  Ok(())
+}
+
+fn teardown_func() {
+  fs::remove_file("setup").unwrap();
+  assert!(!PathBuf::from("setup").exists());
+}
+```
+## Putting it all together!
+
+These features can be combined as they use a comma separated list and so you
+could do something like this:
+
+```rust
+use assay::assay;
+use std::{
+  env,
+  fs,
+  future::Future,
+  path::PathBuf,
+  pin::Pin,
+  task::{Poll, Context},
+};
+
+#[assay(
+  setup = setup_func(5)?,
+  env = [
+    ("GOODBOY", "Bukka"),
+    ("BADDOGS", "false")
+  ],
+  teardown = teardown_func(),
+  include = ["Cargo.toml", "src/lib.rs"],
+  should_panic,
+)]
+async fn one_test_to_call_it_all() {
+  ReadyOnPoll.await;
+
+  assert_eq!(env::var("GOODBOY")?, "Bukka");
+  assert_eq!(env::var("BADDOGS")?, "false");
+  assert_eq!(fs::read_to_string("setup")?, "Value: 5");
+  assert!(PathBuf::from("Cargo.toml").exists());
+  assert!(PathBuf::from("src/lib.rs").exists());
+
+  // Removing this actually causes the test to fail
+  panic!();
+}
+
+struct ReadyOnPoll;
+impl Future for ReadyOnPoll {
+  type Output = ();
+  fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+    Poll::Ready(())
+  }
+}
+
+fn setup_func(input: i32) -> Result<(), Box<dyn std::error::Error>> {
+  fs::write("setup", format!("Value: {}", input))?;
+  Ok(())
+}
+
+fn teardown_func() {
+  fs::remove_file("setup").unwrap();
+  assert!(!PathBuf::from("setup").exists());
+}
+```
+
+Use as many or as few features as you need!
+
 # Limitations
 While `assay` is capable of a lot right now it's not without issues:
-
-- Tests run in their own process and so getting the output available in a good
-  way is still kind of an open problem
-- Sometimes tests that shouldn't pass do, at least when having developed `assay`,
-  because they run in another process. You should intentionally crash your test
-  to make sure it's actually working, because you'll have tests pass that really
-  shouldn't which frankly isn't great
-- Rust Analyzer gets tripped up sometimes and the error propagates to each
-  invocation making it harder to track down. In these cases `cargo test` will
-  let you know where the issue actually is
-- No work on spans yet! This macro just slaps things in and so error messages
-  are much to be desired without much in the way to tell you why an invocation
-  of `assay` fails.
 - `assay` does not work inside doc tests!
-
-# How to use `assay`
-Take a look at [`HOW_TO_USE.md`](HOW_TO_USE.md) (which is included in the crate
-documentation) or [`tests/integration_tests.rs`](tests/integration_tests.rs).
 
 # MSRV Policy
 We do not have a Minimum Supported Rust Version and only track `stable`. Older
@@ -73,4 +311,4 @@ versions might work, but it's not guaranteed.
 
 # License
 All files within this project are distributed under the Mozilla Public License
-version 2.0. You can read the terms of the license in [`LICENSE.txt`](LICENSE.txt).
+version 2.0. You can read the terms of the license [here](https://www.mozilla.org/en-US/MPL/2.0/).

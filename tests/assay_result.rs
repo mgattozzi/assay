@@ -1,3 +1,11 @@
+/*
+ * Copyright (C) 2021 - 2025 Michael Gattozzi <michael@ductile.systems>
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 use assay::assay;
 use assay::eyre::bail;
 use std::error::Error;
@@ -43,7 +51,7 @@ fn check_result_output() {
     "---- result_output_test stdout ----",
     "Error: This test failed",
     "Location:",
-    "assay_result.rs:19:24",
+    "assay_result.rs:27:24",
   ];
   for line in compare {
     if !check_result.contains(line) {
@@ -65,7 +73,7 @@ fn check_bail_output() {
     "---- result_bail_test stdout ----",
     "Error: This is a test failure",
     "Location:",
-    "assay_result.rs:24:3",
+    "assay_result.rs:32:3",
   ];
   for line in compare {
     if !check_result.contains(line) {
