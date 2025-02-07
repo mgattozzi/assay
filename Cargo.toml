@@ -1,7 +1,7 @@
 [package]
 name = "assay"
 version = "0.1.1"
-edition = "2021"
+edition = "2024"
 authors = ["Michael Gattozzi <self@mgattozzi.dev>"]
 description = "A super powered testing macro for Rust"
 documentation = "https://docs.rs/assay"
