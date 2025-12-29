@@ -10,7 +10,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
   parse::{Parse, ParseStream},
-  parse_macro_input, Expr, ExprArray, ExprLit, ExprTuple, Ident, ItemFn, Lit, Result, Token,
+  parse_macro_input, Expr, ExprArray, ExprLit, Ident, ItemFn, Lit, Result, Token,
 };
 
 struct AssayAttribute {
@@ -40,52 +40,171 @@ impl Parse for AssayAttribute {
       let ident: Ident = input.parse()?;
       match ident.to_string().as_str() {
         "include" => {
-          let _: Token![=] = input.parse()?;
-          let array: ExprArray = input.parse()?;
-          include = Some(
-            array
-              .elems
-              .into_iter()
-              .filter_map(|e| match e {
-                Expr::Lit(ExprLit {
-                  lit: Lit::Str(lit_str),
-                  ..
-                }) => Some(lit_str.value()),
-                _ => None,
-              })
-              .collect(),
-          );
+          if include.is_some() {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `include` attribute\nhelp: combine all files into a single array: `include = [\"file1\", \"file2\"]`"
+            ));
+          }
+
+          input.parse::<Token![=]>().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected `=` after `include`\nhelp: use `include = [\"file.txt\"]`",
+            )
+          })?;
+          let array: ExprArray = input.parse().map_err(|e| {
+            syn::Error::new(e.span(), "expected array after `include =`\nhelp: use `include = [\"file.txt\", \"other.txt\"]`")
+          })?;
+
+          if array.elems.is_empty() {
+            return Err(syn::Error::new_spanned(
+              &array,
+              "include array cannot be empty\nhelp: provide at least one file path, e.g., `include = [\"Cargo.toml\"]`"
+            ));
+          }
+
+          let mut files = Vec::new();
+          for elem in array.elems {
+            match elem {
+              Expr::Lit(ExprLit {
+                lit: Lit::Str(lit_str),
+                ..
+              }) => {
+                files.push(lit_str.value());
+              }
+              other => {
+                return Err(syn::Error::new_spanned(
+                  &other,
+                  "include array elements must be string literals\nhelp: use `include = [\"file1.txt\", \"file2.txt\"]`"
+                ));
+              }
+            }
+          }
+
+          include = Some(files);
         }
-        "should_panic" => should_panic = true,
-        "ignore" => ignore = true,
+        "should_panic" => {
+          if should_panic {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `should_panic` attribute",
+            ));
+          }
+          should_panic = true;
+        }
+        "ignore" => {
+          if ignore {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `ignore` attribute",
+            ));
+          }
+          ignore = true;
+        }
         "env" => {
-          let _: Token![=] = input.parse()?;
-          let array: ExprArray = input.parse()?;
-          env = Some(
-            array
-              .elems
-              .into_iter()
-              .filter_map(|e| match e {
-                Expr::Tuple(ExprTuple { elems, .. }) => match (&elems[0], &elems[1]) {
-                  (
-                    Expr::Lit(ExprLit {
-                      lit: Lit::Str(lit_1),
-                      ..
-                    }),
-                    Expr::Lit(ExprLit {
-                      lit: Lit::Str(lit_2),
-                      ..
-                    }),
-                  ) => Some((lit_1.value(), lit_2.value())),
-                  _ => None,
-                },
-                _ => None,
-              })
-              .collect(),
-          );
+          if env.is_some() {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `env` attribute\nhelp: combine all variables into a single array: `env = [(\"K1\", \"v1\"), (\"K2\", \"v2\")]`"
+            ));
+          }
+
+          input.parse::<Token![=]>().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected `=` after `env`\nhelp: use `env = [(\"KEY\", \"value\")]`",
+            )
+          })?;
+          let array: ExprArray = input.parse().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected array after `env =`\nhelp: use `env = [(\"KEY\", \"value\")]`",
+            )
+          })?;
+
+          if array.elems.is_empty() {
+            return Err(syn::Error::new_spanned(
+              &array,
+              "env array cannot be empty\nhelp: provide at least one environment variable, e.g., `env = [(\"KEY\", \"value\")]`"
+            ));
+          }
+
+          let mut env_vars = Vec::new();
+          for elem in array.elems {
+            match &elem {
+              Expr::Tuple(tuple) => {
+                if tuple.elems.len() != 2 {
+                  return Err(syn::Error::new_spanned(
+                    &elem,
+                    format!(
+                      "env tuple must have exactly 2 elements (key, value), found {}\nhelp: use `(\"KEY\", \"value\")` format",
+                      tuple.elems.len()
+                    )
+                  ));
+                }
+
+                let key = match &tuple.elems[0] {
+                  Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                  }) => s.value(),
+                  other => {
+                    return Err(syn::Error::new_spanned(
+                      other,
+                      "env key must be a string literal\nhelp: use `(\"KEY\", \"value\")` format",
+                    ));
+                  }
+                };
+
+                let value = match &tuple.elems[1] {
+                  Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                  }) => s.value(),
+                  other => {
+                    return Err(syn::Error::new_spanned(
+                      other,
+                      "env value must be a string literal\nhelp: use `(\"KEY\", \"value\")` format",
+                    ));
+                  }
+                };
+
+                env_vars.push((key, value));
+              }
+              other => {
+                return Err(syn::Error::new_spanned(
+                  other,
+                  "env array elements must be tuples of (key, value)\nhelp: use `env = [(\"KEY1\", \"value1\"), (\"KEY2\", \"value2\")]`"
+                ));
+              }
+            }
+          }
+
+          env = Some(env_vars);
         }
         val @ "setup" | val @ "teardown" => {
-          let _: Token![=] = input.parse()?;
+          if val == "setup" {
+            if setup.is_some() {
+              return Err(syn::Error::new_spanned(
+                &ident,
+                "duplicate `setup` attribute",
+              ));
+            }
+          } else if teardown.is_some() {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `teardown` attribute",
+            ));
+          }
+
+          input.parse::<Token![=]>().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              format!(
+                "expected `=` after `{}`\nhelp: use `{} = my_function`",
+                val, val
+              ),
+            )
+          })?;
           let x = input.parse()?;
           if val == "setup" {
             setup = Some(x);
@@ -93,7 +212,32 @@ impl Parse for AssayAttribute {
             teardown = Some(x);
           }
         }
-        _ => {}
+        unknown => {
+          let suggestion = match unknown {
+            "includes" => Some("include"),
+            "envs" | "environment" => Some("env"),
+            "panic" | "panics" => Some("should_panic"),
+            "ignored" => Some("ignore"),
+            "set_up" | "before" | "before_each" => Some("setup"),
+            "tear_down" | "after" | "after_each" | "cleanup" => Some("teardown"),
+            _ => None,
+          };
+
+          let valid_attrs = "include, ignore, should_panic, env, setup, teardown";
+
+          let message = match suggestion {
+            Some(suggested) => format!(
+              "unknown attribute `{}`\nhelp: did you mean `{}`?\nvalid attributes are: {}",
+              unknown, suggested, valid_attrs
+            ),
+            None => format!(
+              "unknown attribute `{}`\nvalid attributes are: {}",
+              unknown, valid_attrs
+            ),
+          };
+
+          return Err(syn::Error::new_spanned(&ident, message));
+        }
       }
     }
 

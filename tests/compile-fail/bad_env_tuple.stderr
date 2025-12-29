@@ -1,0 +1,6 @@
+error: env value must be a string literal
+       help: use `("KEY", "value")` format
+  --> tests/compile-fail/bad_env_tuple.rs:11:24
+   |
+11 | #[assay(env = [("KEY", 123)])]
+   |                        ^^^

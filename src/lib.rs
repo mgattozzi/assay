@@ -12,6 +12,7 @@ pub mod net;
 
 pub use assay_proc_macro::assay;
 pub use eyre;
+use eyre::WrapErr;
 pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
 
 use std::{
@@ -61,9 +62,18 @@ pub struct PrivateFS {
 
 impl PrivateFS {
   pub fn new() -> Result<Self> {
-    let ran_from = env::current_dir()?;
-    let directory = Builder::new().prefix("private").tempdir()?;
-    env::set_current_dir(directory.path())?;
+    let ran_from =
+      env::current_dir().wrap_err("failed to get current directory for test isolation")?;
+    let directory = Builder::new()
+      .prefix("private")
+      .tempdir()
+      .wrap_err("failed to create temporary directory for test isolation")?;
+    env::set_current_dir(directory.path()).wrap_err_with(|| {
+      format!(
+        "failed to change to temporary directory: {}",
+        directory.path().display()
+      )
+    })?;
     Ok(Self {
       ran_from,
       directory,
@@ -71,14 +81,33 @@ impl PrivateFS {
   }
 
   pub fn include(&self, path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+
     // Get our pathbuf to the file to include
-    let mut inner_path = path.as_ref().to_owned();
+    let mut inner_path = path.to_owned();
 
     // If the path given is not absolute then it's relative to the dir we
     // ran the test from
     let is_relative = inner_path.is_relative();
     if is_relative {
-      inner_path = self.ran_from.join(&path);
+      inner_path = self.ran_from.join(path);
+    }
+
+    // Validate source file exists before attempting copy
+    if !inner_path.exists() {
+      return Err(eyre::eyre!(
+        "cannot include '{}': file not found\nsearched at: {}",
+        path.display(),
+        inner_path.display()
+      ));
+    }
+
+    if !inner_path.is_file() {
+      return Err(eyre::eyre!(
+        "cannot include '{}': path is not a file (is it a directory?)\npath: {}",
+        path.display(),
+        inner_path.display()
+      ));
     }
 
     // Get our working directory
@@ -92,17 +121,32 @@ impl PrivateFS {
         .filter(|c| *c != Component::RootDir)
         .collect::<PathBuf>()
     } else {
-      path.as_ref().into()
+      path.into()
     };
 
     // If the relative path to the file includes parent directories create
     // them
     if let Some(parent) = relative.parent() {
-      create_dir_all(dir.join(parent))?;
+      let parent_path = dir.join(parent);
+      create_dir_all(&parent_path).wrap_err_with(|| {
+        format!(
+          "failed to create directory structure for '{}'\ntarget directory: {}",
+          path.display(),
+          parent_path.display()
+        )
+      })?;
     }
 
     // Copy the file over from the file system into the temp file system
-    copy(inner_path, dir.join(relative))?;
+    let dest = dir.join(&relative);
+    copy(&inner_path, &dest).wrap_err_with(|| {
+      format!(
+        "failed to copy '{}' to test directory\nsource: {}\ndestination: {}",
+        path.display(),
+        inner_path.display(),
+        dest.display()
+      )
+    })?;
 
     Ok(())
   }

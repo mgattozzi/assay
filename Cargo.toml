@@ -22,6 +22,9 @@ tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 [workspace]
 members = ["assay-proc-macro"]
 
+[dev-dependencies]
+trybuild = "1"
+
 [features]
 default = ["async-tokio-runtime"]
 async-tokio-runtime = ["tokio", "assay-proc-macro/async"]

@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use assay::{assay, assert_eq_sorted};
+use assay::assay;
 use std::{
   collections::HashMap,
   env, fs,

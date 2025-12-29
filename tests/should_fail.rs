@@ -38,15 +38,15 @@ fn panics_in_macros() {
     .unwrap();
   let tests = String::from_utf8(output.stdout).unwrap();
 
-  if !tests.contains(
-    "---- should_not_panic_and_cause_a_failure_case stdout ----
-note: test did not panic as expected",
-  ) && !tests.contains(
-    "---- should_panic_and_cause_a_failure_case stdout ----
-thread 'should_panic_and_cause_a_failure_case' panicked at tests/should_fail.rs:21:3:
-explicit panic
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
-  ) {
+  // Check that the expected failure cases are present in the output
+  // Note: Rust's panic output format varies by version (thread IDs, etc.)
+  let has_not_panic_failure = tests.contains("should_not_panic_and_cause_a_failure_case")
+    && tests.contains("note: test did not panic as expected");
+  let has_panic_failure = tests.contains("should_panic_and_cause_a_failure_case")
+    && tests.contains("panicked at")
+    && tests.contains("explicit panic");
+
+  if !has_not_panic_failure && !has_panic_failure {
     panic!("Unexpected output for panics.\n\nOutput:\n{}", tests);
   }
 }
