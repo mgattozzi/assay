@@ -152,15 +152,50 @@ fn warn_level() {
 Sometimes you want to include files in your tests and generating them is one
 way, but having it in your version control system and then having them be in
 your tests can also be nice! With the `include` directive you can include files
-in your test's directory when you start running it:
+in your test's directory when you start running it.
+
+By default, files are copied to the root of the temp directory using just their
+filename:
 
 ```rust
 use assay::assay;
 
 #[assay(include = ["Cargo.toml", "src/lib.rs"])]
 fn include() {
-  assert!(fs::metadata("src/lib.rs")?.is_file());
+  // Files are at the temp root with the filename only
+  assert!(fs::metadata("lib.rs")?.is_file());     // NOT src/lib.rs
   assert!(fs::metadata("Cargo.toml")?.is_file());
+}
+```
+
+If you need to place files at a specific path within the temp directory, use the
+tuple syntax `(source, destination)`:
+
+```rust
+use assay::assay;
+
+#[assay(include = [
+  ("src/fixtures/data.json", "config/data.json"),
+  ("test_data/input.txt", "input.txt"),
+])]
+fn include_with_paths() {
+  assert!(fs::metadata("config/data.json")?.is_file());
+  assert!(fs::metadata("input.txt")?.is_file());
+}
+```
+
+You can mix both styles in the same include:
+
+```rust
+use assay::assay;
+
+#[assay(include = [
+  "Cargo.toml",                     // → <temp>/Cargo.toml
+  ("src/lib.rs", "sources/lib.rs"), // → <temp>/sources/lib.rs
+])]
+fn mixed_include() {
+  assert!(fs::metadata("Cargo.toml")?.is_file());
+  assert!(fs::metadata("sources/lib.rs")?.is_file());
 }
 ```
 
@@ -273,8 +308,9 @@ async fn one_test_to_call_it_all() {
   assert_eq!(env::var("GOODBOY")?, "Bukka");
   assert_eq!(env::var("BADDOGS")?, "false");
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
+  // Files are at temp root with filename only
   assert!(PathBuf::from("Cargo.toml").exists());
-  assert!(PathBuf::from("src/lib.rs").exists());
+  assert!(PathBuf::from("lib.rs").exists());
 
   // Removing this actually causes the test to fail
   panic!();

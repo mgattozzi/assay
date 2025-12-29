@@ -1,5 +1,5 @@
-error: include array elements must be string literals
-       help: use `include = ["file1.txt", "file2.txt"]`
+error: include array elements must be string literals or tuples
+       help: use `include = ["file.txt"]` or `include = [("source.txt", "dest.txt")]`
   --> tests/compile-fail/bad_include_literal.rs:11:20
    |
 11 | #[assay(include = [123])]

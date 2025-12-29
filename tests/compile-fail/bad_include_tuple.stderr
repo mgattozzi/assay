@@ -1,0 +1,6 @@
+error: include tuple destination must be a string literal
+       help: use `("source.txt", "dest.txt")` format
+  --> tests/compile-fail/bad_include_tuple.rs:11:35
+   |
+11 | #[assay(include = [("source.txt", 123)])]
+   |                                   ^^^

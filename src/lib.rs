@@ -19,7 +19,7 @@ use std::{
   env,
   fs::{copy, create_dir_all},
   panic,
-  path::{Component, Path, PathBuf},
+  path::{Path, PathBuf},
   sync::OnceLock,
 };
 use tempfile::{Builder, TempDir};
@@ -80,71 +80,80 @@ impl PrivateFS {
     })
   }
 
-  pub fn include(&self, path: impl AsRef<Path>) -> Result<()> {
-    let path = path.as_ref();
+  /// Include a file in the test's temporary directory.
+  ///
+  /// The file is copied to the root of the temp directory using only its filename.
+  /// For example, `include("src/fixtures/data.json")` copies to `<temp>/data.json`.
+  ///
+  /// To specify a custom destination path, use [`include_as`](Self::include_as).
+  pub fn include(&self, source: impl AsRef<Path>) -> Result<()> {
+    let source = source.as_ref();
 
-    // Get our pathbuf to the file to include
-    let mut inner_path = path.to_owned();
+    // Extract just the filename for the destination
+    let filename = source.file_name().ok_or_else(|| {
+      eyre::eyre!(
+        "cannot include '{}': path has no filename",
+        source.display()
+      )
+    })?;
 
-    // If the path given is not absolute then it's relative to the dir we
-    // ran the test from
-    let is_relative = inner_path.is_relative();
-    if is_relative {
-      inner_path = self.ran_from.join(path);
-    }
+    self.include_as(source, filename)
+  }
 
-    // Validate source file exists before attempting copy
-    if !inner_path.exists() {
-      return Err(eyre::eyre!(
-        "cannot include '{}': file not found\nsearched at: {}",
-        path.display(),
-        inner_path.display()
-      ));
-    }
+  /// Include a file in the test's temporary directory at a custom destination path.
+  ///
+  /// # Examples
+  ///
+  /// ```ignore
+  /// // Copy src/fixtures/data.json to <temp>/config/data.json
+  /// fs.include_as("src/fixtures/data.json", "config/data.json")?;
+  /// ```
+  pub fn include_as(&self, source: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
+    let source = source.as_ref();
+    let dest = dest.as_ref();
 
-    if !inner_path.is_file() {
-      return Err(eyre::eyre!(
-        "cannot include '{}': path is not a file (is it a directory?)\npath: {}",
-        path.display(),
-        inner_path.display()
-      ));
-    }
-
-    // Get our working directory
-    let dir = self.directory.path().to_owned();
-
-    // Make the relative path of the file in relation to our temp file
-    // system based on if it was absolute or not
-    let relative = if !is_relative {
-      inner_path
-        .components()
-        .filter(|c| *c != Component::RootDir)
-        .collect::<PathBuf>()
+    // Resolve source to absolute path if relative
+    let abs_source = if source.is_relative() {
+      self.ran_from.join(source)
     } else {
-      path.into()
+      source.to_owned()
     };
 
-    // If the relative path to the file includes parent directories create
-    // them
-    if let Some(parent) = relative.parent() {
-      let parent_path = dir.join(parent);
-      create_dir_all(&parent_path).wrap_err_with(|| {
+    // Validate source file exists
+    if !abs_source.exists() {
+      return Err(eyre::eyre!(
+        "cannot include '{}': file not found\nsearched at: {}",
+        source.display(),
+        abs_source.display()
+      ));
+    }
+
+    if !abs_source.is_file() {
+      return Err(eyre::eyre!(
+        "cannot include '{}': path is not a file (is it a directory?)\npath: {}",
+        source.display(),
+        abs_source.display()
+      ));
+    }
+
+    let full_dest = self.directory.path().join(dest);
+
+    if let Some(parent) = full_dest.parent() {
+      create_dir_all(parent).wrap_err_with(|| {
         format!(
           "failed to create directory structure for '{}'\ntarget directory: {}",
-          path.display(),
-          parent_path.display()
+          dest.display(),
+          parent.display()
         )
       })?;
     }
 
-    // Copy the file over from the file system into the temp file system
-    let dest = dir.join(&relative);
-    copy(&inner_path, &dest).wrap_err_with(|| {
+    copy(&abs_source, &full_dest).wrap_err_with(|| {
       format!(
         "failed to copy '{}' to test directory\nsource: {}\ndestination: {}",
-        path.display(),
-        inner_path.display(),
-        dest.display()
+        source.display(),
+        abs_source.display(),
+        full_dest.display()
       )
     })?;
 

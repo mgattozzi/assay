@@ -33,8 +33,23 @@ fn private_2() {
 
 #[assay(include = ["Cargo.toml", "src/lib.rs"])]
 fn include() {
-  assert!(fs::metadata("src/lib.rs")?.is_file());
+  assert!(fs::metadata("lib.rs")?.is_file());
   assert!(fs::metadata("Cargo.toml")?.is_file());
+  assert!(!PathBuf::from("src/lib.rs").exists());
+}
+
+#[assay(include = [("Cargo.toml", "config/Cargo.toml"), ("src/lib.rs", "sources/lib.rs")])]
+fn include_with_custom_dest() {
+  assert!(fs::metadata("config/Cargo.toml")?.is_file());
+  assert!(fs::metadata("sources/lib.rs")?.is_file());
+  assert!(!PathBuf::from("Cargo.toml").exists());
+  assert!(!PathBuf::from("lib.rs").exists());
+}
+
+#[assay(include = ["Cargo.toml", ("src/lib.rs", "custom/lib.rs")])]
+fn include_mixed_syntax() {
+  assert!(fs::metadata("Cargo.toml")?.is_file());
+  assert!(fs::metadata("custom/lib.rs")?.is_file());
 }
 
 #[assay(should_panic)]
@@ -110,7 +125,7 @@ async fn one_test_to_call_it_all() {
   assert_eq!(env::var("BADDOGS")?, "false");
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
   assert!(PathBuf::from("Cargo.toml").exists());
-  assert!(PathBuf::from("src/lib.rs").exists());
+  assert!(PathBuf::from("lib.rs").exists());
 
   // Removing this actually causes the test to fail
   panic!();
@@ -133,7 +148,7 @@ async fn one_test_to_call_it_all_2() {
   assert_eq!(env::var("BADDOGS")?, "false");
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
   assert!(PathBuf::from("Cargo.toml").exists());
-  assert!(PathBuf::from("src/lib.rs").exists());
+  assert!(PathBuf::from("lib.rs").exists());
 
   // Removing this actually causes the test to fail
   panic!();

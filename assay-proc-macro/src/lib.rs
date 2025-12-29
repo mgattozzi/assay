@@ -14,7 +14,9 @@ use syn::{
 };
 
 struct AssayAttribute {
-  include: Option<Vec<String>>,
+  /// (source_path, optional_dest_path)
+  /// If dest is None, file is copied to temp root with its filename only
+  include: Option<Vec<(String, Option<String>)>>,
   ignore: bool,
   should_panic: bool,
   env: Option<Vec<(String, String)>>,
@@ -67,16 +69,55 @@ impl Parse for AssayAttribute {
           let mut files = Vec::new();
           for elem in array.elems {
             match elem {
+              // String literal: copy to temp root with filename only
               Expr::Lit(ExprLit {
                 lit: Lit::Str(lit_str),
                 ..
               }) => {
-                files.push(lit_str.value());
+                files.push((lit_str.value(), None));
+              }
+              // Tuple: (source, dest) for custom destination
+              Expr::Tuple(tuple) => {
+                if tuple.elems.len() != 2 {
+                  return Err(syn::Error::new_spanned(
+                    &tuple,
+                    format!(
+                      "include tuple must have exactly 2 elements (source, dest), found {}\nhelp: use `(\"source.txt\", \"dest.txt\")` format",
+                      tuple.elems.len()
+                    )
+                  ));
+                }
+
+                let source = match &tuple.elems[0] {
+                  Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                  }) => s.value(),
+                  other => {
+                    return Err(syn::Error::new_spanned(
+                      other,
+                      "include tuple source must be a string literal\nhelp: use `(\"source.txt\", \"dest.txt\")` format",
+                    ));
+                  }
+                };
+
+                let dest = match &tuple.elems[1] {
+                  Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                  }) => s.value(),
+                  other => {
+                    return Err(syn::Error::new_spanned(
+                      other,
+                      "include tuple destination must be a string literal\nhelp: use `(\"source.txt\", \"dest.txt\")` format",
+                    ));
+                  }
+                };
+
+                files.push((source, Some(dest)));
               }
               other => {
                 return Err(syn::Error::new_spanned(
                   &other,
-                  "include array elements must be string literals\nhelp: use `include = [\"file1.txt\", \"file2.txt\"]`"
+                  "include array elements must be string literals or tuples\nhelp: use `include = [\"file.txt\"]` or `include = [(\"source.txt\", \"dest.txt\")]`"
                 ));
               }
             }
@@ -260,10 +301,16 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut out = quote! {
       let fs = assay::PrivateFS::new()?;
     };
-    for file in include {
-      out = quote! {
-        #out
-        fs.include(#file)?;
+    for (source, dest) in include {
+      out = match dest {
+        Some(d) => quote! {
+          #out
+          fs.include_as(#source, #d)?;
+        },
+        None => quote! {
+          #out
+          fs.include(#source)?;
+        },
       };
     }
     out
@@ -346,6 +393,13 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! { child() }
   };
 
+  // For ignored tests, subprocess needs --ignored flag
+  let subprocess_extra_args = if attr.ignore {
+    quote! { .arg("--ignored") }
+  } else {
+    quote! {}
+  };
+
   let expanded = quote! {
       #[test]
       #should_panic
@@ -384,12 +438,11 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
             .map(|s| s.as_str() != "1")
             .unwrap_or(true)
         {
-          let mut args = std::env::args().collect::<Vec<String>>();
-          if !args.contains(&name) {
-            args.push(name.clone());
-          }
-          let out = std::process::Command::new(&args[0])
-            .args(if args.len() == 1 { &[] } else { &args[1..] })
+          let binary = std::env::args().next().expect("no binary path in args");
+          let out = std::process::Command::new(&binary)
+            .arg(&name)
+            .arg("--exact")
+            #subprocess_extra_args
             .env("ASSAY_SPLIT", "1")
             .output()
             .expect("executed a subprocess");
