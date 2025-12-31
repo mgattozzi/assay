@@ -341,6 +341,92 @@ fn retried_with_timeout() {
 attribute is ignored. Configure retries in `.config/nextest.toml` instead using
 nextest's native retry configuration.
 
+## Parameterized Tests - Cases
+
+Run the same test logic with different named test cases. Each case generates
+a separate test function with a descriptive name:
+
+```rust
+use assay::assay;
+
+#[assay(
+  cases = [
+    positive: (2, 3, 5),
+    zeros: (0, 0, 0),
+    negative: (-1, -2, -3),
+  ]
+)]
+fn test_addition(a: i32, b: i32, expected: i32) {
+  assert_eq!(a + b, expected);
+}
+```
+
+This generates three tests:
+- `test_addition_positive` - tests `2 + 3 = 5`
+- `test_addition_zeros` - tests `0 + 0 = 0`
+- `test_addition_negative` - tests `-1 + -2 = -3`
+
+Cases work with strings and other types too:
+
+```rust
+use assay::assay;
+
+#[assay(
+  cases = [
+    hello: ("hello", 5),
+    empty: ("", 0),
+    spaces: ("a b c", 5),
+  ]
+)]
+fn test_string_length(s: &str, expected: usize) {
+  assert_eq!(s.len(), expected);
+}
+```
+
+## Parameterized Tests - Matrix
+
+Generate all combinations of parameter values automatically. This is useful
+when you want to test every combination of inputs:
+
+```rust
+use assay::assay;
+
+#[assay(
+  matrix = [
+    a: [1, 2],
+    b: [10, 20],
+  ]
+)]
+fn test_multiply(a: i32, b: i32) {
+  assert!(a * b >= 10);
+}
+```
+
+This generates four tests for all combinations:
+- `test_multiply_1_10` - tests with `a=1, b=10`
+- `test_multiply_1_20` - tests with `a=1, b=20`
+- `test_multiply_2_10` - tests with `a=2, b=10`
+- `test_multiply_2_20` - tests with `a=2, b=20`
+
+Matrix parameters must match function parameters in order:
+
+```rust
+use assay::assay;
+
+#[assay(
+  matrix = [
+    x: [true, false],
+    y: [true, false],
+  ]
+)]
+fn test_booleans(x: bool, y: bool) {
+  // Tests all 4 combinations: (true,true), (true,false), (false,true), (false,false)
+  let _ = x && y;
+}
+```
+
+**Note**: `cases` and `matrix` are mutually exclusive - use one or the other.
+
 ## Putting it all together!
 
 These features can be combined as they use a comma separated list and so you

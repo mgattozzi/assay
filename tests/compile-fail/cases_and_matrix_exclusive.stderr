@@ -1,0 +1,6 @@
+error: `cases` and `matrix` are mutually exclusive
+       help: use one or the other, not both
+  --> tests/compile-fail/cases_and_matrix_exclusive.rs:15:3
+   |
+15 |   matrix = [
+   |   ^^^^^^

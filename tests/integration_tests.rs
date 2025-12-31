@@ -228,3 +228,108 @@ impl Future for ReadyOnPoll {
     Poll::Ready(())
   }
 }
+
+// Parameterized tests - cases
+#[assay(
+  cases = [
+    positive: (2, 3, 5),
+    zeros: (0, 0, 0),
+    negative: (-1, -2, -3),
+  ]
+)]
+fn cases_basic_addition(a: i32, b: i32, expected: i32) {
+  assert_eq!(a + b, expected);
+}
+
+#[assay(
+  cases = [
+    hello: ("hello", 5),
+    empty: ("", 0),
+    spaces: ("a b c", 5),
+  ]
+)]
+fn cases_string_length(s: &str, expected: usize) {
+  assert_eq!(s.len(), expected);
+}
+
+#[assay(
+  cases = [
+    case_true: (true, 1),
+    case_false: (false, 0),
+  ]
+)]
+fn cases_two_params(b: bool, n: i32) {
+  if b {
+    assert_eq!(n, 1);
+  } else {
+    assert_eq!(n, 0);
+  }
+}
+
+#[assay(
+  cases = [
+    with_file: (true, "Cargo.toml"),
+  ],
+  include = ["Cargo.toml"],
+)]
+fn cases_with_include(check_file: bool, filename: &str) {
+  if check_file {
+    assert!(PathBuf::from(filename).exists());
+  }
+}
+
+// Parameterized tests - matrix (combinatorial)
+#[assay(
+  matrix = [
+    a: [1, 2],
+    b: [10, 20],
+  ]
+)]
+fn matrix_basic(a: i32, b: i32) {
+  assert!(a * b >= 10);
+}
+
+#[assay(
+  matrix = [
+    x: [true, false],
+    y: [true, false],
+  ]
+)]
+fn matrix_booleans(x: bool, y: bool) {
+  // Test all 4 combinations
+  let _ = x && y;
+  let _ = x || y;
+}
+
+#[assay(
+  matrix = [
+    s: ["hello", "world"],
+    n: [1, 2, 3],
+  ]
+)]
+fn matrix_mixed_types(s: &str, n: i32) {
+  assert!(!s.is_empty());
+  assert!(n > 0);
+}
+
+#[assay(
+  matrix = [
+    val: [-1, 0, 1],
+    mult: [1, 2],
+  ]
+)]
+fn matrix_two_params(val: i32, mult: i32) {
+  let result = val * mult;
+  assert!(result >= -2 && result <= 2);
+}
+
+#[assay(
+  matrix = [
+    a: [1, 2],
+    b: [3, 4],
+  ],
+  timeout = "5s",
+)]
+fn matrix_with_timeout(a: i32, b: i32) {
+  assert!(a + b > 0);
+}
