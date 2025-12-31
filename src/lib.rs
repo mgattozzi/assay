@@ -25,6 +25,10 @@ use std::{
 };
 use tempfile::{Builder, TempDir};
 
+/// A convenient Result type that uses `eyre::Report` as the error type.
+///
+/// This allows using the `?` operator in tests without verbose error type annotations.
+/// All errors are automatically converted to `eyre::Report` for unified error handling.
 pub type Result<T> = std::result::Result<T, eyre::Report>;
 
 #[doc(hidden)]

@@ -188,7 +188,7 @@ fn retries_passes_immediately() {
 
 #[assay(retries = 2)]
 fn retries_with_single_retry() {
-  assert!(true);
+  assert_eq!(1 + 1, 2);
 }
 
 #[assay(retries = 2)]
@@ -308,7 +308,7 @@ fn matrix_booleans(x: bool, y: bool) {
   ]
 )]
 fn matrix_mixed_types(s: &str, n: i32) {
-  assert!(!s.is_empty());
+  assert_ne!(s.len(), 0);
   assert!(n > 0);
 }
 
@@ -320,7 +320,7 @@ fn matrix_mixed_types(s: &str, n: i32) {
 )]
 fn matrix_two_params(val: i32, mult: i32) {
   let result = val * mult;
-  assert!(result >= -2 && result <= 2);
+  assert!((-2..=2).contains(&result));
 }
 
 #[assay(

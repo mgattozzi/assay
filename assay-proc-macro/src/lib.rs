@@ -17,6 +17,37 @@ use syn::{
   UnOp,
 };
 
+// ============================================================
+// Constants
+// ============================================================
+
+/// Environment variable set to "1" when running in subprocess mode
+const ENV_ASSAY_SPLIT: &str = "ASSAY_SPLIT";
+
+/// Milliseconds per second for duration formatting
+const MILLIS_PER_SECOND: u64 = 1000;
+
+/// Milliseconds per minute for duration parsing
+const MILLIS_PER_MINUTE: u64 = 60_000;
+
+/// Valid attribute names for the #[assay] macro
+const VALID_ATTRIBUTES: &[&str] = &[
+  "include",
+  "ignore",
+  "should_panic",
+  "env",
+  "setup",
+  "teardown",
+  "timeout",
+  "retries",
+  "cases",
+  "matrix",
+];
+
+// ============================================================
+// Helper Structs for Parsing
+// ============================================================
+
 /// A named test case with arguments
 struct NamedCase {
   name: Ident,
@@ -28,6 +59,10 @@ struct MatrixParam {
   name: Ident,
   values: Vec<Expr>,
 }
+
+// ============================================================
+// Parsing Utilities
+// ============================================================
 
 /// Convert an expression to a valid identifier component for test naming.
 /// Returns None if the expression is too complex (fallback to index).
@@ -132,10 +167,10 @@ fn parse_duration(s: &str) -> std::result::Result<u64, String> {
     .map_err(|_| format!("invalid number in duration: '{}'", num_str))?;
 
   let millis = match unit.to_lowercase().as_str() {
-    "s" | "sec" | "secs" | "second" | "seconds" => num.checked_mul(1000),
+    "s" | "sec" | "secs" | "second" | "seconds" => num.checked_mul(MILLIS_PER_SECOND),
     "ms" | "milli" | "millis" | "millisecond" | "milliseconds" => Some(num),
-    "m" | "min" | "mins" | "minute" | "minutes" => num.checked_mul(60 * 1000),
-    "" => num.checked_mul(1000), // bare number = seconds
+    "m" | "min" | "mins" | "minute" | "minutes" => num.checked_mul(MILLIS_PER_MINUTE),
+    "" => num.checked_mul(MILLIS_PER_SECOND), // bare number = seconds
     other => {
       return Err(format!(
         "unknown duration unit: '{}'\nvalid units: s, ms, m",
@@ -153,6 +188,164 @@ fn parse_duration(s: &str) -> std::result::Result<u64, String> {
   Ok(millis)
 }
 
+/// Formats milliseconds as a human-readable duration string for display.
+/// Returns "Xs" for whole seconds (e.g., "30s"), "Xms" otherwise (e.g., "500ms").
+fn format_timeout_display(millis: u64) -> String {
+  if millis >= MILLIS_PER_SECOND && millis.is_multiple_of(MILLIS_PER_SECOND) {
+    format!("{}s", millis / MILLIS_PER_SECOND)
+  } else {
+    format!("{}ms", millis)
+  }
+}
+
+// ============================================================
+// Code Generation Helpers
+// ============================================================
+
+/// Generates code to spawn a subprocess with timeout handling.
+/// The subprocess runs the test binary with the given name and waits for completion
+/// or kills it after the timeout expires.
+fn quote_subprocess_with_timeout(
+  subprocess_extra_args: &TokenStream2,
+  millis: u64,
+) -> TokenStream2 {
+  let timeout_display = format_timeout_display(millis);
+
+  quote! {
+    let binary = std::env::args().next().expect("no binary path in args");
+    use assay::wait_timeout::ChildExt;
+    use std::io::Read;
+
+    let mut child = std::process::Command::new(&binary)
+      .arg(&name)
+      .arg("--exact")
+      #subprocess_extra_args
+      .env(#ENV_ASSAY_SPLIT, "1")
+      .stdout(std::process::Stdio::piped())
+      .stderr(std::process::Stdio::piped())
+      .spawn()
+      .expect("failed to spawn subprocess");
+
+    let timeout_duration = std::time::Duration::from_millis(#millis);
+    let stdout = match child.wait_timeout(timeout_duration).expect("failed to wait on subprocess") {
+      Some(_status) => {
+        let mut stdout = String::new();
+        if let Some(ref mut out) = child.stdout {
+          out.read_to_string(&mut stdout).ok();
+        }
+        stdout
+      }
+      None => {
+        child.kill().expect("failed to kill timed-out subprocess");
+        child.wait().expect("failed to wait after kill");
+        panic!("test timed out after {}", #timeout_display);
+      }
+    };
+  }
+}
+
+/// Generates code to spawn a subprocess without timeout (blocking wait).
+fn quote_subprocess_no_timeout(subprocess_extra_args: &TokenStream2) -> TokenStream2 {
+  quote! {
+    let binary = std::env::args().next().expect("no binary path in args");
+    let out = std::process::Command::new(&binary)
+      .arg(&name)
+      .arg("--exact")
+      #subprocess_extra_args
+      .env(#ENV_ASSAY_SPLIT, "1")
+      .output()
+      .expect("executed a subprocess");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+  }
+}
+
+/// Generates the subprocess handling code based on whether timeout is configured.
+fn quote_subprocess_handling(
+  subprocess_extra_args: &TokenStream2,
+  timeout: Option<u64>,
+) -> TokenStream2 {
+  match timeout {
+    Some(millis) => quote_subprocess_with_timeout(subprocess_extra_args, millis),
+    None => quote_subprocess_no_timeout(subprocess_extra_args),
+  }
+}
+
+/// Generates the retry loop that runs the subprocess and extracts failure output.
+/// This handles running the test subprocess, checking for failures, and extracting
+/// the relevant stdout section for error reporting.
+fn quote_retry_loop(subprocess_handling: &TokenStream2, retry_count: u32) -> TokenStream2 {
+  quote! {
+    let mut last_failure: Option<String> = None;
+    for _attempt in 1..=#retry_count {
+      #subprocess_handling
+      if stdout.contains(&format!("{name} - should panic ... ok"))
+        || stdout.contains(&format!("{name} ... FAILED"))
+      {
+        let stdout_line = format!("---- {name} stdout ----");
+        let split = stdout
+          .lines()
+          .skip_while(|line| line != &stdout_line)
+          .skip(1)
+          .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
+          .collect::<Vec<&str>>()
+          .join("\n");
+        last_failure = Some(split);
+        continue;
+      } else {
+        last_failure = None;
+        break;
+      }
+    }
+    if let Some(failure) = last_failure {
+      assay::panic_replace();
+      panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{}", failure);
+    }
+  }
+}
+
+/// Generates the full test execution logic including nextest detection,
+/// subprocess spawning, retry handling, and failure propagation.
+fn quote_test_execution(
+  subprocess_handling: &TokenStream2,
+  child: &TokenStream2,
+  ret: &TokenStream2,
+  retry_count: u32,
+  test_name_expr: &TokenStream2,
+) -> TokenStream2 {
+  let retry_loop = quote_retry_loop(subprocess_handling, retry_count);
+
+  quote! {
+    if std::env::var("NEXTEST_EXECUTION_MODE")
+      .ok()
+      .as_ref()
+      .map(|s| s.as_str() == "process-per-test")
+      .unwrap_or(false)
+    {
+      // Note: timeout and retries attributes are ignored in nextest process-per-test mode
+      // Configure via .config/nextest.toml: slow-timeout, leak-timeout, retries
+      #child
+    } else {
+      let name = #test_name_expr;
+      if std::env::var(#ENV_ASSAY_SPLIT)
+        .as_ref()
+        .map(|s| s.as_str() != "1")
+        .unwrap_or(true)
+      {
+        #retry_loop
+        #ret
+      } else {
+        #child
+      }
+    }
+  }
+}
+
+// ============================================================
+// Attribute Parsing
+// ============================================================
+
+/// Parsed representation of all arguments to the `#[assay]` attribute macro.
+/// Each field corresponds to a possible attribute argument.
 struct AssayAttribute {
   /// (source_path, optional_dest_path)
   /// If dest is None, file is copied to temp root with its filename only
@@ -657,8 +850,7 @@ impl Parse for AssayAttribute {
             _ => None,
           };
 
-          let valid_attrs =
-            "include, ignore, should_panic, env, setup, teardown, timeout, retries, cases, matrix";
+          let valid_attrs = VALID_ATTRIBUTES.join(", ");
 
           let message = match suggestion {
             Some(suggested) => format!(
@@ -691,6 +883,28 @@ impl Parse for AssayAttribute {
   }
 }
 
+// ============================================================
+// Main Macro
+// ============================================================
+
+/// A super powered testing macro for Rust.
+///
+/// The `#[assay]` attribute transforms a function into a test that runs in its own
+/// process with automatic temp directory isolation. Each test gets a clean environment
+/// with no interference from other tests.
+///
+/// # Supported Attributes
+///
+/// - `include = ["file.txt", ("src/a.rs", "dest/a.rs")]` - Copy files into temp directory
+/// - `env = [("KEY", "value")]` - Set environment variables
+/// - `setup = setup_fn()?` - Run before the test
+/// - `teardown = teardown_fn()` - Run after the test
+/// - `should_panic` - Expect the test to panic
+/// - `ignore` - Skip this test
+/// - `timeout = "30s"` - Fail if test exceeds duration (supports s, ms, m)
+/// - `retries = 3` - Retry on failure up to N times total
+/// - `cases = [name: (args)]` - Parameterized testing with named cases
+/// - `matrix = [param: [values]]` - Combinatorial testing
 #[proc_macro_attribute]
 pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let attr = parse_macro_input!(attr as AssayAttribute);
@@ -799,61 +1013,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   };
 
   // Generate subprocess handling code - with or without timeout
-  let subprocess_handling = if let Some(millis) = attr.timeout {
-    // Format timeout for display (e.g., "30s" or "500ms")
-    let timeout_display = if millis >= 1000 && millis % 1000 == 0 {
-      format!("{}s", millis / 1000)
-    } else {
-      format!("{}ms", millis)
-    };
-
-    quote! {
-      let binary = std::env::args().next().expect("no binary path in args");
-      use assay::wait_timeout::ChildExt;
-      use std::io::Read;
-
-      let mut child = std::process::Command::new(&binary)
-        .arg(&name)
-        .arg("--exact")
-        #subprocess_extra_args
-        .env("ASSAY_SPLIT", "1")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("failed to spawn subprocess");
-
-      let timeout_duration = std::time::Duration::from_millis(#millis);
-      let stdout = match child.wait_timeout(timeout_duration).expect("failed to wait on subprocess") {
-        Some(_status) => {
-          // Process completed within timeout
-          let mut stdout = String::new();
-          if let Some(ref mut out) = child.stdout {
-            out.read_to_string(&mut stdout).ok();
-          }
-          stdout
-        }
-        None => {
-          // Timeout! Kill the child process
-          child.kill().expect("failed to kill timed-out subprocess");
-          child.wait().expect("failed to wait after kill");
-          panic!("test timed out after {}", #timeout_display);
-        }
-      };
-    }
-  } else {
-    // No timeout - use original blocking .output()
-    quote! {
-      let binary = std::env::args().next().expect("no binary path in args");
-      let out = std::process::Command::new(&binary)
-        .arg(&name)
-        .arg("--exact")
-        #subprocess_extra_args
-        .env("ASSAY_SPLIT", "1")
-        .output()
-        .expect("executed a subprocess");
-      let stdout = String::from_utf8(out.stdout).unwrap();
-    }
-  };
+  let subprocess_handling = quote_subprocess_handling(&subprocess_extra_args, attr.timeout);
 
   // Get retry count (1 = run once, no retries)
   let retry_count = attr.retries.unwrap_or(1);
@@ -881,60 +1041,29 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
 
   // Helper to generate a single test function
   let generate_test = |test_fn_name: Ident, param_bindings: TokenStream2| -> TokenStream2 {
-    // Generate subprocess handling with the correct test name
-    let subprocess_handling_for_test = if let Some(millis) = attr.timeout {
-      let timeout_display = if millis >= 1000 && millis % 1000 == 0 {
-        format!("{}s", millis / 1000)
-      } else {
-        format!("{}ms", millis)
-      };
+    let subprocess_handling_for_test =
+      quote_subprocess_handling(&subprocess_extra_args, attr.timeout);
+    let test_fn_name_for_body = test_fn_name.clone();
 
-      quote! {
-        let binary = std::env::args().next().expect("no binary path in args");
-        use assay::wait_timeout::ChildExt;
-        use std::io::Read;
-
-        let mut child = std::process::Command::new(&binary)
-          .arg(&name)
-          .arg("--exact")
-          #subprocess_extra_args
-          .env("ASSAY_SPLIT", "1")
-          .stdout(std::process::Stdio::piped())
-          .stderr(std::process::Stdio::piped())
-          .spawn()
-          .expect("failed to spawn subprocess");
-
-        let timeout_duration = std::time::Duration::from_millis(#millis);
-        let stdout = match child.wait_timeout(timeout_duration).expect("failed to wait on subprocess") {
-          Some(_status) => {
-            let mut stdout = String::new();
-            if let Some(ref mut out) = child.stdout {
-              out.read_to_string(&mut stdout).ok();
-            }
-            stdout
-          }
-          None => {
-            child.kill().expect("failed to kill timed-out subprocess");
-            child.wait().expect("failed to wait after kill");
-            panic!("test timed out after {}", #timeout_display);
-          }
-        };
-      }
-    } else {
-      quote! {
-        let binary = std::env::args().next().expect("no binary path in args");
-        let out = std::process::Command::new(&binary)
-          .arg(&name)
-          .arg("--exact")
-          #subprocess_extra_args
-          .env("ASSAY_SPLIT", "1")
-          .output()
-          .expect("executed a subprocess");
-        let stdout = String::from_utf8(out.stdout).unwrap();
+    let test_name_expr = quote! {
+      {
+        let mut module = module_path!()
+          .split("::")
+          .into_iter()
+          .skip(1)
+          .collect::<Vec<_>>();
+        module.push(stringify!(#test_fn_name_for_body));
+        module.join("::")
       }
     };
 
-    let test_fn_name_for_body = test_fn_name.clone();
+    let test_execution = quote_test_execution(
+      &subprocess_handling_for_test,
+      &child,
+      &ret,
+      retry_count,
+      &test_name_expr,
+    );
 
     quote! {
       #[test]
@@ -953,56 +1082,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
           Ok(())
         }
 
-        if std::env::var("NEXTEST_EXECUTION_MODE")
-          .ok()
-          .as_ref()
-          .map(|s| s.as_str() == "process-per-test")
-          .unwrap_or(false)
-        {
-          #child
-        } else {
-          let name = {
-            let mut module = module_path!()
-              .split("::")
-              .into_iter()
-              .skip(1)
-              .collect::<Vec<_>>();
-            module.push(stringify!(#test_fn_name_for_body));
-            module.join("::")
-          };
-          if std::env::var("ASSAY_SPLIT")
-              .as_ref()
-              .map(|s| s.as_str() != "1")
-              .unwrap_or(true)
-          {
-            let mut last_failure: Option<String> = None;
-            for _attempt in 1..=#retry_count {
-              #subprocess_handling_for_test
-              if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
-                let stdout_line = format!("---- {name} stdout ----");
-                let split = stdout
-                  .lines()
-                  .skip_while(|line| line != &stdout_line)
-                  .skip(1)
-                  .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
-                  .collect::<Vec<&str>>()
-                  .join("\n");
-                last_failure = Some(split);
-                continue;
-              } else {
-                last_failure = None;
-                break;
-              }
-            }
-            if let Some(failure) = last_failure {
-              assay::panic_replace();
-              panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{}", failure);
-            }
-            #ret
-          } else {
-            #child
-          }
-        }
+        #test_execution
       }
     }
   };
@@ -1095,74 +1175,43 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(quote! { #(#tests)* })
   } else {
     // No parameterization - generate single test as before
-    let expanded = quote! {
-        #[test]
-        #should_panic
-        #ignore
-        #fn_sig {
-          #[allow(unreachable_code)]
-          fn child() -> assay::Result<()> {
-            use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
-            #include
-            #setup
-            #env
-            #body
-            #teardown
-            Ok(())
-          }
+    let test_name_expr = quote! {
+      {
+        let mut module = module_path!()
+          .split("::")
+          .into_iter()
+          .skip(1)
+          .collect::<Vec<_>>();
+        module.push(stringify!(#name));
+        module.join("::")
+      }
+    };
 
-        if std::env::var("NEXTEST_EXECUTION_MODE")
-          .ok()
-          .as_ref()
-          .map(|s| s.as_str() == "process-per-test")
-          .unwrap_or(false)
-        {
-          // Note: timeout and retries attributes are ignored in nextest process-per-test mode
-          // Configure via .config/nextest.toml: slow-timeout, leak-timeout, retries
-          #child
-        } else {
-          let name = {
-            let mut module = module_path!()
-              .split("::")
-              .into_iter()
-              .skip(1)
-              .collect::<Vec<_>>();
-            module.push(stringify!(#name));
-            module.join("::")
-          };
-          if std::env::var("ASSAY_SPLIT")
-              .as_ref()
-              .map(|s| s.as_str() != "1")
-              .unwrap_or(true)
-          {
-            let mut last_failure: Option<String> = None;
-            for _attempt in 1..=#retry_count {
-              #subprocess_handling
-              if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
-                let stdout_line = format!("---- {name} stdout ----");
-                let split = stdout
-                  .lines()
-                  .skip_while(|line| line != &stdout_line)
-                  .skip(1)
-                  .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
-                  .collect::<Vec<&str>>()
-                  .join("\n");
-                last_failure = Some(split);
-                continue; // Retry
-              } else {
-                last_failure = None;
-                break; // Success
-              }
-            }
-            if let Some(failure) = last_failure {
-              assay::panic_replace();
-              panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{}", failure);
-            }
-            #ret
-          } else{
-            #child
-          }
+    let test_execution = quote_test_execution(
+      &subprocess_handling,
+      &child,
+      &ret,
+      retry_count,
+      &test_name_expr,
+    );
+
+    let expanded = quote! {
+      #[test]
+      #should_panic
+      #ignore
+      #fn_sig {
+        #[allow(unreachable_code)]
+        fn child() -> assay::Result<()> {
+          use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
+          #include
+          #setup
+          #env
+          #body
+          #teardown
+          Ok(())
         }
+
+        #test_execution
       }
     };
 
