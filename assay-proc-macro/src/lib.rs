@@ -13,6 +13,51 @@ use syn::{
   parse_macro_input, Expr, ExprArray, ExprLit, Ident, ItemFn, Lit, Result, Token,
 };
 
+/// Parse a duration string like "30s", "500ms", "2m" into milliseconds.
+fn parse_duration(s: &str) -> std::result::Result<u64, String> {
+  let s = s.trim();
+
+  if s.is_empty() {
+    return Err("duration cannot be empty".to_string());
+  }
+
+  // Try to split into number and unit
+  let (num_str, unit) = if let Some(idx) = s.find(|c: char| !c.is_ascii_digit()) {
+    (&s[..idx], s[idx..].trim())
+  } else {
+    (s, "") // bare number, default to seconds
+  };
+
+  if num_str.is_empty() {
+    return Err(format!("invalid duration '{}': missing number", s));
+  }
+
+  let num: u64 = num_str
+    .parse()
+    .map_err(|_| format!("invalid number in duration: '{}'", num_str))?;
+
+  let millis = match unit.to_lowercase().as_str() {
+    "s" | "sec" | "secs" | "second" | "seconds" => num.checked_mul(1000),
+    "ms" | "milli" | "millis" | "millisecond" | "milliseconds" => Some(num),
+    "m" | "min" | "mins" | "minute" | "minutes" => num.checked_mul(60 * 1000),
+    "" => num.checked_mul(1000), // bare number = seconds
+    other => {
+      return Err(format!(
+        "unknown duration unit: '{}'\nvalid units: s, ms, m",
+        other
+      ))
+    }
+  };
+
+  let millis = millis.ok_or_else(|| "timeout duration overflow".to_string())?;
+
+  if millis == 0 {
+    return Err("timeout cannot be zero".to_string());
+  }
+
+  Ok(millis)
+}
+
 struct AssayAttribute {
   /// (source_path, optional_dest_path)
   /// If dest is None, file is copied to temp root with its filename only
@@ -22,6 +67,8 @@ struct AssayAttribute {
   env: Option<Vec<(String, String)>>,
   setup: Option<Expr>,
   teardown: Option<Expr>,
+  /// Timeout in milliseconds
+  timeout: Option<u64>,
 }
 
 impl Parse for AssayAttribute {
@@ -32,6 +79,7 @@ impl Parse for AssayAttribute {
     let mut env = None;
     let mut setup = None;
     let mut teardown = None;
+    let mut timeout = None;
 
     while input.peek(Ident) || {
       if input.peek(Token![,]) {
@@ -253,6 +301,41 @@ impl Parse for AssayAttribute {
             teardown = Some(x);
           }
         }
+        "timeout" => {
+          if timeout.is_some() {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `timeout` attribute",
+            ));
+          }
+
+          input.parse::<Token![=]>().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected `=` after `timeout`\nhelp: use `timeout = \"30s\"`",
+            )
+          })?;
+
+          let lit: syn::LitStr = input.parse().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected string after `timeout =`\nhelp: use `timeout = \"30s\"` or `timeout = \"500ms\"`",
+            )
+          })?;
+
+          let duration_str = lit.value();
+          let millis = parse_duration(&duration_str).map_err(|msg| {
+            syn::Error::new_spanned(
+              &lit,
+              format!(
+                "{}\nhelp: use `timeout = \"30s\"` or `timeout = \"500ms\"`",
+                msg
+              ),
+            )
+          })?;
+
+          timeout = Some(millis);
+        }
         unknown => {
           let suggestion = match unknown {
             "includes" => Some("include"),
@@ -261,10 +344,11 @@ impl Parse for AssayAttribute {
             "ignored" => Some("ignore"),
             "set_up" | "before" | "before_each" => Some("setup"),
             "tear_down" | "after" | "after_each" | "cleanup" => Some("teardown"),
+            "time" | "time_out" | "timelimit" | "time_limit" => Some("timeout"),
             _ => None,
           };
 
-          let valid_attrs = "include, ignore, should_panic, env, setup, teardown";
+          let valid_attrs = "include, ignore, should_panic, env, setup, teardown, timeout";
 
           let message = match suggestion {
             Some(suggested) => format!(
@@ -289,6 +373,7 @@ impl Parse for AssayAttribute {
       env,
       setup,
       teardown,
+      timeout,
     })
   }
 }
@@ -400,6 +485,63 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {}
   };
 
+  // Generate subprocess handling code - with or without timeout
+  let subprocess_handling = if let Some(millis) = attr.timeout {
+    // Format timeout for display (e.g., "30s" or "500ms")
+    let timeout_display = if millis >= 1000 && millis % 1000 == 0 {
+      format!("{}s", millis / 1000)
+    } else {
+      format!("{}ms", millis)
+    };
+
+    quote! {
+      let binary = std::env::args().next().expect("no binary path in args");
+      use assay::wait_timeout::ChildExt;
+      use std::io::Read;
+
+      let mut child = std::process::Command::new(&binary)
+        .arg(&name)
+        .arg("--exact")
+        #subprocess_extra_args
+        .env("ASSAY_SPLIT", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn subprocess");
+
+      let timeout_duration = std::time::Duration::from_millis(#millis);
+      let stdout = match child.wait_timeout(timeout_duration).expect("failed to wait on subprocess") {
+        Some(_status) => {
+          // Process completed within timeout
+          let mut stdout = String::new();
+          if let Some(ref mut out) = child.stdout {
+            out.read_to_string(&mut stdout).ok();
+          }
+          stdout
+        }
+        None => {
+          // Timeout! Kill the child process
+          child.kill().expect("failed to kill timed-out subprocess");
+          child.wait().expect("failed to wait after kill");
+          panic!("test timed out after {}", #timeout_display);
+        }
+      };
+    }
+  } else {
+    // No timeout - use original blocking .output()
+    quote! {
+      let binary = std::env::args().next().expect("no binary path in args");
+      let out = std::process::Command::new(&binary)
+        .arg(&name)
+        .arg("--exact")
+        #subprocess_extra_args
+        .env("ASSAY_SPLIT", "1")
+        .output()
+        .expect("executed a subprocess");
+      let stdout = String::from_utf8(out.stdout).unwrap();
+    }
+  };
+
   let expanded = quote! {
       #[test]
       #should_panic
@@ -422,6 +564,8 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|s| s.as_str() == "process-per-test")
         .unwrap_or(false)
       {
+        // Note: timeout attribute is ignored in nextest process-per-test mode
+        // Configure via .config/nextest.toml: slow-timeout, leak-timeout
         #child
       } else {
         let name = {
@@ -438,15 +582,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
             .map(|s| s.as_str() != "1")
             .unwrap_or(true)
         {
-          let binary = std::env::args().next().expect("no binary path in args");
-          let out = std::process::Command::new(&binary)
-            .arg(&name)
-            .arg("--exact")
-            #subprocess_extra_args
-            .env("ASSAY_SPLIT", "1")
-            .output()
-            .expect("executed a subprocess");
-          let stdout = String::from_utf8(out.stdout).unwrap();
+          #subprocess_handling
           if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
             let stdout_line = format!("---- {name} stdout ----");
             let split = stdout

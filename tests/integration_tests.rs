@@ -154,6 +154,32 @@ async fn one_test_to_call_it_all_2() {
   panic!();
 }
 
+// Timeout tests
+#[assay(timeout = "5s")]
+fn timeout_passes() {
+  std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
+#[assay(timeout = "500ms")]
+fn timeout_millis_passes() {
+  std::thread::sleep(std::time::Duration::from_millis(50));
+}
+
+#[assay(timeout = "5s")]
+async fn async_timeout_passes() {
+  ReadyOnPoll.await;
+}
+
+#[assay(
+  timeout = "10s",
+  env = [("TIMEOUT_TEST_VAR", "value")],
+  include = ["Cargo.toml"],
+)]
+fn timeout_with_other_features() {
+  assert_eq!(env::var("TIMEOUT_TEST_VAR").unwrap(), "value");
+  assert!(PathBuf::from("Cargo.toml").exists());
+}
+
 fn setup_func(input: i32) -> assay::Result<()> {
   fs::write("setup", format!("Value: {}", input))?;
   Ok(())

@@ -276,6 +276,41 @@ fn teardown_func() {
   assert!(!PathBuf::from("setup").exists());
 }
 ```
+
+## Timeout
+
+You can set a timeout for tests to prevent them from hanging indefinitely:
+
+```rust
+use assay::assay;
+
+#[assay(timeout = "30s")]  // Test must complete within 30 seconds
+fn network_test() {
+  // If this takes longer than 30 seconds, the test fails
+}
+
+#[assay(timeout = "500ms")]  // Milliseconds for fast tests
+fn quick_test() {
+  // Must complete within 500 milliseconds
+}
+
+#[assay(timeout = "2m")]  // Minutes for slow integration tests
+fn slow_integration_test() {
+  // Must complete within 2 minutes
+}
+```
+
+Supported duration formats:
+- Seconds: `"30s"`, `"30sec"`, `"30 seconds"`
+- Milliseconds: `"500ms"`, `"500 millis"`
+- Minutes: `"2m"`, `"2min"`, `"2 minutes"`
+
+The timeout covers the entire test execution including setup and teardown functions.
+
+**Note**: When using `cargo-nextest` with `process-per-test` mode, the timeout
+attribute is ignored in favor of nextest's native timeout configuration.
+Configure timeouts in `.config/nextest.toml` instead.
+
 ## Putting it all together!
 
 These features can be combined as they use a comma separated list and so you

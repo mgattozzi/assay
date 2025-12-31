@@ -1,6 +1,6 @@
 error: unknown attribute `includes`
        help: did you mean `include`?
-       valid attributes are: include, ignore, should_panic, env, setup, teardown
+       valid attributes are: include, ignore, should_panic, env, setup, teardown, timeout
   --> tests/compile-fail/unknown_attribute.rs:11:9
    |
 11 | #[assay(includes = ["file.txt"])]

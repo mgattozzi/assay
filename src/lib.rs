@@ -14,6 +14,7 @@ pub use assay_proc_macro::assay;
 pub use eyre;
 use eyre::WrapErr;
 pub use pretty_assertions_sorted::{assert_eq, assert_eq_sorted, assert_ne};
+pub use wait_timeout;
 
 use std::{
   env,

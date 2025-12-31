@@ -18,6 +18,7 @@ eyre = "0.6"
 pretty_assertions_sorted = "1"
 tempfile = "3.14.0"
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+wait-timeout = "0.2"
 
 [workspace]
 members = ["assay-proc-macro"]

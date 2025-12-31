@@ -24,6 +24,12 @@ fn should_panic_and_cause_a_failure_case() {
 #[assay(ignore, should_panic)]
 fn should_not_panic_and_cause_a_failure_case() {}
 
+#[assay(ignore, timeout = "2s")]
+fn timeout_exceeded() {
+  // Sleep longer than timeout - this SHOULD fail with timeout
+  std::thread::sleep(std::time::Duration::from_secs(10));
+}
+
 #[test]
 fn panics_in_macros() {
   let output = Command::new("cargo")
@@ -34,6 +40,7 @@ fn panics_in_macros() {
       "--ignored",
       "panic_and_cause_a_failure_case",
     ])
+    .env_remove("NEXTEST_EXECUTION_MODE")
     .output()
     .unwrap();
   let tests = String::from_utf8(output.stdout).unwrap();
@@ -48,5 +55,23 @@ fn panics_in_macros() {
 
   if !has_not_panic_failure && !has_panic_failure {
     panic!("Unexpected output for panics.\n\nOutput:\n{}", tests);
+  }
+}
+
+#[test]
+fn timeout_fires_correctly() {
+  let output = Command::new("cargo")
+    .args(["test", "--workspace", "--", "--ignored", "timeout_exceeded"])
+    .env_remove("NEXTEST_EXECUTION_MODE")
+    .output()
+    .unwrap();
+  let tests = String::from_utf8(output.stdout).unwrap();
+
+  // Verify the test timed out
+  let has_timeout_failure =
+    tests.contains("timeout_exceeded") && tests.contains("test timed out after 2s");
+
+  if !has_timeout_failure {
+    panic!("Expected timeout failure not found.\n\nOutput:\n{}", tests);
   }
 }
