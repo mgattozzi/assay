@@ -1,0 +1,6 @@
+error: expected integer after `retries =`
+       help: use `retries = 3`
+  --> tests/compile-fail/bad_retries_string.rs:11:19
+   |
+11 | #[assay(retries = "3")]
+   |                   ^^^

@@ -180,6 +180,33 @@ fn timeout_with_other_features() {
   assert!(PathBuf::from("Cargo.toml").exists());
 }
 
+// Retries tests
+#[assay(retries = 3)]
+fn retries_passes_immediately() {
+  assert_eq!(1 + 1, 2);
+}
+
+#[assay(retries = 2)]
+fn retries_with_single_retry() {
+  assert!(true);
+}
+
+#[assay(retries = 2)]
+async fn async_retries_test() {
+  ReadyOnPoll.await;
+}
+
+#[assay(
+  retries = 3,
+  timeout = "10s",
+  env = [("RETRIES_TEST_VAR", "value")],
+  include = ["Cargo.toml"],
+)]
+fn retries_with_other_features() {
+  assert_eq!(env::var("RETRIES_TEST_VAR").unwrap(), "value");
+  assert!(PathBuf::from("Cargo.toml").exists());
+}
+
 fn setup_func(input: i32) -> assay::Result<()> {
   fs::write("setup", format!("Value: {}", input))?;
   Ok(())

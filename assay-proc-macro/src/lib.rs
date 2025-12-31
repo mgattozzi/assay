@@ -69,6 +69,8 @@ struct AssayAttribute {
   teardown: Option<Expr>,
   /// Timeout in milliseconds
   timeout: Option<u64>,
+  /// Number of retry attempts (1 = run once, 2 = one retry, etc.)
+  retries: Option<u32>,
 }
 
 impl Parse for AssayAttribute {
@@ -80,6 +82,7 @@ impl Parse for AssayAttribute {
     let mut setup = None;
     let mut teardown = None;
     let mut timeout = None;
+    let mut retries = None;
 
     while input.peek(Ident) || {
       if input.peek(Token![,]) {
@@ -336,6 +339,44 @@ impl Parse for AssayAttribute {
 
           timeout = Some(millis);
         }
+        "retries" => {
+          if retries.is_some() {
+            return Err(syn::Error::new_spanned(
+              &ident,
+              "duplicate `retries` attribute",
+            ));
+          }
+
+          input.parse::<Token![=]>().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected `=` after `retries`\nhelp: use `retries = 3`",
+            )
+          })?;
+
+          let lit: syn::LitInt = input.parse().map_err(|e| {
+            syn::Error::new(
+              e.span(),
+              "expected integer after `retries =`\nhelp: use `retries = 3`",
+            )
+          })?;
+
+          let count: u32 = lit.base10_parse().map_err(|_| {
+            syn::Error::new_spanned(
+              &lit,
+              "retries must be a positive integer\nhelp: use `retries = 3`",
+            )
+          })?;
+
+          if count == 0 {
+            return Err(syn::Error::new_spanned(
+              &lit,
+              "retries cannot be zero\nhelp: use `retries = 1` to run once, or omit for default behavior",
+            ));
+          }
+
+          retries = Some(count);
+        }
         unknown => {
           let suggestion = match unknown {
             "includes" => Some("include"),
@@ -345,10 +386,11 @@ impl Parse for AssayAttribute {
             "set_up" | "before" | "before_each" => Some("setup"),
             "tear_down" | "after" | "after_each" | "cleanup" => Some("teardown"),
             "time" | "time_out" | "timelimit" | "time_limit" => Some("timeout"),
+            "retry" | "attempts" | "tries" | "repeat" | "flaky" => Some("retries"),
             _ => None,
           };
 
-          let valid_attrs = "include, ignore, should_panic, env, setup, teardown, timeout";
+          let valid_attrs = "include, ignore, should_panic, env, setup, teardown, timeout, retries";
 
           let message = match suggestion {
             Some(suggested) => format!(
@@ -374,6 +416,7 @@ impl Parse for AssayAttribute {
       setup,
       teardown,
       timeout,
+      retries,
     })
   }
 }
@@ -542,6 +585,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
   };
 
+  // Get retry count (1 = run once, no retries)
+  let retry_count = attr.retries.unwrap_or(1);
+
   let expanded = quote! {
       #[test]
       #should_panic
@@ -564,8 +610,8 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|s| s.as_str() == "process-per-test")
         .unwrap_or(false)
       {
-        // Note: timeout attribute is ignored in nextest process-per-test mode
-        // Configure via .config/nextest.toml: slow-timeout, leak-timeout
+        // Note: timeout and retries attributes are ignored in nextest process-per-test mode
+        // Configure via .config/nextest.toml: slow-timeout, leak-timeout, retries
         #child
       } else {
         let name = {
@@ -582,18 +628,28 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
             .map(|s| s.as_str() != "1")
             .unwrap_or(true)
         {
-          #subprocess_handling
-          if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
-            let stdout_line = format!("---- {name} stdout ----");
-            let split = stdout
-              .lines()
-              .skip_while(|line| line != &stdout_line)
-              .skip(1)
-              .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
-              .collect::<Vec<&str>>()
-              .join("\n");
+          let mut last_failure: Option<String> = None;
+          for _attempt in 1..=#retry_count {
+            #subprocess_handling
+            if stdout.contains(&format!("{name} - should panic ... ok")) || stdout.contains(&format!("{name} ... FAILED")) {
+              let stdout_line = format!("---- {name} stdout ----");
+              let split = stdout
+                .lines()
+                .skip_while(|line| line != &stdout_line)
+                .skip(1)
+                .take_while(|s| !s.starts_with("----") && !s.starts_with("failures:"))
+                .collect::<Vec<&str>>()
+                .join("\n");
+              last_failure = Some(split);
+              continue; // Retry
+            } else {
+              last_failure = None;
+              break; // Success
+            }
+          }
+          if let Some(failure) = last_failure {
             assay::panic_replace();
-            panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{split}")
+            panic!("ASSAY_PANIC_INTERNAL_MESSAGE\n{}", failure);
           }
           #ret
         } else{

@@ -311,6 +311,36 @@ The timeout covers the entire test execution including setup and teardown functi
 attribute is ignored in favor of nextest's native timeout configuration.
 Configure timeouts in `.config/nextest.toml` instead.
 
+## Retries
+
+You can configure tests to retry on failure. This is useful for flaky tests or
+tests that depend on external resources that may occasionally be unavailable:
+
+```rust
+use assay::assay;
+
+#[assay(retries = 3)]  // Test will run up to 3 times total
+fn flaky_network_test() {
+  // If this fails, it will be retried up to 2 more times
+  // If any attempt passes, the test passes silently
+}
+```
+
+When combined with timeout, each retry attempt gets its own fresh timeout:
+
+```rust
+use assay::assay;
+
+#[assay(retries = 3, timeout = "5s")]
+fn retried_with_timeout() {
+  // Each of the 3 attempts can take up to 5 seconds
+}
+```
+
+**Note**: When using `cargo-nextest` with `process-per-test` mode, the retries
+attribute is ignored. Configure retries in `.config/nextest.toml` instead using
+nextest's native retry configuration.
+
 ## Putting it all together!
 
 These features can be combined as they use a comma separated list and so you

@@ -1,0 +1,6 @@
+error: retries cannot be zero
+       help: use `retries = 1` to run once, or omit for default behavior
+  --> tests/compile-fail/bad_retries_zero.rs:11:19
+   |
+11 | #[assay(retries = 0)]
+   |                   ^

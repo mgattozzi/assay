@@ -30,6 +30,12 @@ fn timeout_exceeded() {
   std::thread::sleep(std::time::Duration::from_secs(10));
 }
 
+#[assay(ignore, retries = 2)]
+fn retries_exhausted() {
+  // This always fails - should fail after all retries are exhausted
+  panic!("always fails");
+}
+
 #[test]
 fn panics_in_macros() {
   let output = Command::new("cargo")
@@ -73,5 +79,27 @@ fn timeout_fires_correctly() {
 
   if !has_timeout_failure {
     panic!("Expected timeout failure not found.\n\nOutput:\n{}", tests);
+  }
+}
+
+#[test]
+fn retries_eventually_fail() {
+  let output = Command::new("cargo")
+    .args([
+      "test",
+      "--workspace",
+      "--",
+      "--ignored",
+      "retries_exhausted",
+    ])
+    .output()
+    .unwrap();
+  let tests = String::from_utf8(output.stdout).unwrap();
+
+  // Verify the test ultimately failed after retries
+  let has_retry_failure = tests.contains("retries_exhausted") && tests.contains("FAILED");
+
+  if !has_retry_failure {
+    panic!("Expected retry failure not found.\n\nOutput:\n{}", tests);
   }
 }
