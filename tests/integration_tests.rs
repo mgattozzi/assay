@@ -52,7 +52,8 @@ fn include_mixed_syntax() {
   assert!(fs::metadata("custom/lib.rs")?.is_file());
 }
 
-#[assay(should_panic)]
+#[should_panic]
+#[assay]
 fn hash_map_comparison() {
   let map1: HashMap<String, u8> = (0..5).map(|n| (n.to_string(), n)).collect();
   let mut map2: HashMap<String, u8> = (0..5).map(|n| (n.to_string(), n)).collect();
@@ -66,17 +67,20 @@ async fn async_func() {
   ReadyOnPoll.await;
 }
 
-#[assay(should_panic)]
+#[should_panic]
+#[assay]
 fn panic_test() {
   panic!("Panic! At The Proc-Macro");
 }
 
-#[assay(include = ["Cargo.toml"], should_panic)]
+#[should_panic]
+#[assay(include = ["Cargo.toml"])]
 fn multiple_attribute_values() {
   panic!("Panic! At The Proc-Macro 2: Cargo.toml Boogaloo");
 }
 
-#[assay(should_panic, include = ["Cargo.toml"])]
+#[should_panic]
+#[assay(include = ["Cargo.toml"])]
 fn multiple_attribute_values_in_different_order() {
   panic!("Panic! At The Proc-Macro 3: Attribute Switcharoo");
 }
@@ -108,6 +112,7 @@ fn setup_teardown_test_2() {
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
 }
 
+#[should_panic]
 #[assay(
   setup = setup_func_2(),
   include = ["Cargo.toml", "src/lib.rs"],
@@ -116,7 +121,6 @@ fn setup_teardown_test_2() {
     ("BADDOGS", "false")
   ],
   teardown = teardown_func(),
-  should_panic,
 )]
 async fn one_test_to_call_it_all() {
   ReadyOnPoll.await;
@@ -131,6 +135,7 @@ async fn one_test_to_call_it_all() {
   panic!();
 }
 
+#[should_panic]
 #[assay(
   setup = setup_func(5)?,
   env = [
@@ -139,7 +144,6 @@ async fn one_test_to_call_it_all() {
   ],
   teardown = teardown_func(),
   include = ["Cargo.toml", "src/lib.rs"],
-  should_panic,
 )]
 async fn one_test_to_call_it_all_2() {
   ReadyOnPoll.await;
@@ -332,4 +336,26 @@ fn matrix_two_params(val: i32, mult: i32) {
 )]
 fn matrix_with_timeout(a: i32, b: i32) {
   assert!(a + b > 0);
+}
+
+// Verifies that #[allow(...)] attributes are preserved through macro expansion.
+// If the attribute is eaten, clippy will fail with `clippy::assertions_on_constants`.
+#[allow(clippy::assertions_on_constants)]
+#[assay]
+fn preserves_other_attributes() {
+  assert!(true);
+}
+
+// Test that #[should_panic] works when placed AFTER #[assay]
+#[assay]
+#[should_panic]
+fn should_panic_after_assay() {
+  panic!("This should work with should_panic after assay");
+}
+
+// Test that #[ignore] works when placed AFTER #[assay]
+#[assay]
+#[ignore]
+fn ignore_after_assay() {
+  panic!("This test is ignored so this panic should never run");
 }

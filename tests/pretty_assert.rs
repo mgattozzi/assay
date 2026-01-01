@@ -9,17 +9,20 @@
 use assay::assay;
 use std::process::Command;
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn assert_eq() {
   assert_eq!(1, 5);
 }
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn assert_ne() {
   assert_ne!(["foo", "bar"], ["foo", "bar"]);
 }
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn assert_eq_sorted() {
   assert_eq_sorted!([1, 3, 2], [1, 2, 4]);
 }

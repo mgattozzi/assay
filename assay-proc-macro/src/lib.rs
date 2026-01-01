@@ -32,16 +32,7 @@ const MILLIS_PER_MINUTE: u64 = 60_000;
 
 /// Valid attribute names for the #[assay] macro
 const VALID_ATTRIBUTES: &[&str] = &[
-  "include",
-  "ignore",
-  "should_panic",
-  "env",
-  "setup",
-  "teardown",
-  "timeout",
-  "retries",
-  "cases",
-  "matrix",
+  "include", "env", "setup", "teardown", "timeout", "retries", "cases", "matrix",
 ];
 
 // ============================================================
@@ -346,12 +337,13 @@ fn quote_test_execution(
 
 /// Parsed representation of all arguments to the `#[assay]` attribute macro.
 /// Each field corresponds to a possible attribute argument.
+///
+/// Note: `#[ignore]` and `#[should_panic]` are standard Rust test attributes
+/// and should be placed directly on the function, not inside `#[assay(...)]`.
 struct AssayAttribute {
   /// (source_path, optional_dest_path)
   /// If dest is None, file is copied to temp root with its filename only
   include: Option<Vec<(String, Option<String>)>>,
-  ignore: bool,
-  should_panic: bool,
   env: Option<Vec<(String, String)>>,
   setup: Option<Expr>,
   teardown: Option<Expr>,
@@ -368,8 +360,6 @@ struct AssayAttribute {
 impl Parse for AssayAttribute {
   fn parse(input: ParseStream) -> Result<Self> {
     let mut include = None;
-    let mut ignore = false;
-    let mut should_panic = false;
     let mut env = None;
     let mut setup = None;
     let mut teardown = None;
@@ -469,24 +459,6 @@ impl Parse for AssayAttribute {
           }
 
           include = Some(files);
-        }
-        "should_panic" => {
-          if should_panic {
-            return Err(syn::Error::new_spanned(
-              &ident,
-              "duplicate `should_panic` attribute",
-            ));
-          }
-          should_panic = true;
-        }
-        "ignore" => {
-          if ignore {
-            return Err(syn::Error::new_spanned(
-              &ident,
-              "duplicate `ignore` attribute",
-            ));
-          }
-          ignore = true;
         }
         "env" => {
           if env.is_some() {
@@ -836,11 +808,28 @@ impl Parse for AssayAttribute {
           matrix = Some(params);
         }
         unknown => {
+          // Check if user is trying to use standard test attributes inside #[assay(...)]
+          if matches!(
+            unknown,
+            "ignore" | "ignored" | "should_panic" | "panic" | "panics"
+          ) {
+            let attr_name = if unknown.contains("panic") {
+              "should_panic"
+            } else {
+              "ignore"
+            };
+            return Err(syn::Error::new_spanned(
+              &ident,
+              format!(
+                "`{}` should be a separate attribute, not inside #[assay(...)]\nhelp: use `#[{}]` before or after `#[assay]`",
+                unknown, attr_name
+              ),
+            ));
+          }
+
           let suggestion = match unknown {
             "includes" => Some("include"),
             "envs" | "environment" => Some("env"),
-            "panic" | "panics" => Some("should_panic"),
-            "ignored" => Some("ignore"),
             "set_up" | "before" | "before_each" => Some("setup"),
             "tear_down" | "after" | "after_each" | "cleanup" => Some("teardown"),
             "time" | "time_out" | "timelimit" | "time_limit" => Some("timeout"),
@@ -870,8 +859,6 @@ impl Parse for AssayAttribute {
 
     Ok(AssayAttribute {
       include,
-      ignore,
-      should_panic,
       env,
       setup,
       teardown,
@@ -899,12 +886,16 @@ impl Parse for AssayAttribute {
 /// - `env = [("KEY", "value")]` - Set environment variables
 /// - `setup = setup_fn()?` - Run before the test
 /// - `teardown = teardown_fn()` - Run after the test
-/// - `should_panic` - Expect the test to panic
-/// - `ignore` - Skip this test
 /// - `timeout = "30s"` - Fail if test exceeds duration (supports s, ms, m)
 /// - `retries = 3` - Retry on failure up to N times total
 /// - `cases = [name: (args)]` - Parameterized testing with named cases
 /// - `matrix = [param: [values]]` - Combinatorial testing
+///
+/// # Standard Test Attributes
+///
+/// Use standard Rust test attributes as separate attributes:
+/// - `#[should_panic]` or `#[should_panic(expected = "...")]`
+/// - `#[ignore]`
 #[proc_macro_attribute]
 pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let attr = parse_macro_input!(attr as AssayAttribute);
@@ -932,18 +923,6 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
   };
 
-  let ignore = if attr.ignore {
-    quote! { #[ignore] }
-  } else {
-    quote! {}
-  };
-
-  let should_panic = if attr.should_panic {
-    quote! { #[should_panic] }
-  } else {
-    quote! {}
-  };
-
   let env = if let Some(env) = attr.env {
     let mut out = quote! {};
     for (k, v) in env {
@@ -968,6 +947,33 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
 
   // Parse the function out into individual parts
   let func = parse_macro_input!(item as ItemFn);
+
+  // Detect standard test attributes from the function
+  let has_ignore = func.attrs.iter().any(|attr| attr.path.is_ident("ignore"));
+  let has_should_panic = func
+    .attrs
+    .iter()
+    .any(|attr| attr.path.is_ident("should_panic"));
+
+  // Find the should_panic attribute to preserve its arguments (e.g., expected = "...")
+  let should_panic_attr = func
+    .attrs
+    .iter()
+    .find(|attr| attr.path.is_ident("should_panic"))
+    .cloned();
+
+  // Preserve non-conflicting attributes from the original function
+  let other_attrs: Vec<_> = func
+    .attrs
+    .into_iter()
+    .filter(|attr| {
+      // Skip attributes that we handle specially
+      !attr.path.is_ident("test")
+        && !attr.path.is_ident("ignore")
+        && !attr.path.is_ident("should_panic")
+    })
+    .collect();
+
   let vis = func.vis;
   let mut sig = func.sig;
   let name = sig.ident.clone();
@@ -987,26 +993,39 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! { #block }
   };
 
-  let fn_sig = if attr.should_panic {
+  // Generate attribute tokens for the test function
+  let ignore = if has_ignore {
+    quote! { #[ignore] }
+  } else {
+    quote! {}
+  };
+
+  // Preserve the full should_panic attribute including any arguments like expected = "..."
+  let should_panic = match &should_panic_attr {
+    Some(attr) => quote! { #attr },
+    None => quote! {},
+  };
+
+  let fn_sig = if has_should_panic {
     quote! { #vis #sig }
   } else {
     quote! { #vis #sig -> assay::Result<()> }
   };
 
-  let ret = if attr.should_panic {
+  let ret = if has_should_panic {
     quote! {}
   } else {
     quote! { Ok(()) }
   };
 
-  let child = if attr.should_panic {
+  let child = if has_should_panic {
     quote! { child().unwrap() }
   } else {
     quote! { child() }
   };
 
   // For ignored tests, subprocess needs --ignored flag
-  let subprocess_extra_args = if attr.ignore {
+  let subprocess_extra_args = if has_ignore {
     quote! { .arg("--ignored") }
   } else {
     quote! {}
@@ -1019,7 +1038,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let retry_count = attr.retries.unwrap_or(1);
 
   // Return type for generated test functions
-  let ret_type = if attr.should_panic {
+  let ret_type = if has_should_panic {
     quote! {}
   } else {
     quote! { -> assay::Result<()> }
@@ -1066,6 +1085,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     );
 
     quote! {
+      #(#other_attrs)*
       #[test]
       #should_panic
       #ignore
@@ -1196,6 +1216,7 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     );
 
     let expanded = quote! {
+      #(#other_attrs)*
       #[test]
       #should_panic
       #ignore

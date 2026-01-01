@@ -200,15 +200,35 @@ fn mixed_include() {
 ```
 
 ## Panics
-`assay` will also let you mark a test that you expect to panic much like you
-would for a normal Rust test:
+`assay` works with the standard `#[should_panic]` attribute:
 
 ```rust
 use assay::assay;
 
-#[assay(should_panic)]
+#[should_panic]
+#[assay]
 fn panic_test() {
   panic!("Panic! At The Proc-Macro");
+}
+
+#[should_panic(expected = "specific message")]
+#[assay]
+fn panic_with_message() {
+  panic!("specific message");
+}
+```
+
+## Ignored Tests
+
+Use the standard `#[ignore]` attribute to skip tests:
+
+```rust
+use assay::assay;
+
+#[ignore]
+#[assay]
+fn slow_test() {
+  // This test is skipped by default
 }
 ```
 
@@ -443,6 +463,7 @@ use std::{
   task::{Poll, Context},
 };
 
+#[should_panic]
 #[assay(
   setup = setup_func(5)?,
   env = [
@@ -451,7 +472,6 @@ use std::{
   ],
   teardown = teardown_func(),
   include = ["Cargo.toml", "src/lib.rs"],
-  should_panic,
 )]
 async fn one_test_to_call_it_all() {
   ReadyOnPoll.await;

@@ -12,7 +12,8 @@ use std::error::Error;
 use std::fmt::Display;
 use std::process::{Command, Stdio};
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn result_output_test() {
   #[derive(Debug)]
   struct TestError;
@@ -27,7 +28,8 @@ fn result_output_test() {
   return Err(TestError.into());
 }
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn result_bail_test() {
   bail!("This is a test failure");
 }
@@ -51,7 +53,7 @@ fn check_result_output() {
     "---- result_output_test stdout ----",
     "Error: This test failed",
     "Location:",
-    "assay_result.rs:27:24",
+    "assay_result.rs:28:24",
   ];
   for line in compare {
     if !check_result.contains(line) {
@@ -73,7 +75,7 @@ fn check_bail_output() {
     "---- result_bail_test stdout ----",
     "Error: This is a test failure",
     "Location:",
-    "assay_result.rs:32:3",
+    "assay_result.rs:34:3",
   ];
   for line in compare {
     if !check_result.contains(line) {

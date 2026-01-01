@@ -16,21 +16,26 @@
 use assay::assay;
 use std::process::Command;
 
-#[assay(ignore)]
+#[ignore]
+#[assay]
 fn should_panic_and_cause_a_failure_case() {
   panic!()
 }
 
-#[assay(ignore, should_panic)]
+#[ignore]
+#[should_panic]
+#[assay]
 fn should_not_panic_and_cause_a_failure_case() {}
 
-#[assay(ignore, timeout = "2s")]
+#[ignore]
+#[assay(timeout = "2s")]
 fn timeout_exceeded() {
   // Sleep longer than timeout - this SHOULD fail with timeout
   std::thread::sleep(std::time::Duration::from_secs(10));
 }
 
-#[assay(ignore, retries = 2)]
+#[ignore]
+#[assay(retries = 2)]
 fn retries_exhausted() {
   // This always fails - should fail after all retries are exhausted
   panic!("always fails");
