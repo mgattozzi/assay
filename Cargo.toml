@@ -1,6 +1,6 @@
 [package]
 name = "assay"
-version = "0.1.1"
+version = "0.2.0-nightly"
 edition = "2024"
 authors = ["Michael Gattozzi <self@mgattozzi.dev>"]
 description = "A super powered testing macro for Rust"
