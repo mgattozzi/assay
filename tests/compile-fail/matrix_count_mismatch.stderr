@@ -1,0 +1,6 @@
+error: matrix has 1 parameters but function has 2
+       help: matrix parameters must match function parameters
+  --> tests/compile-fail/matrix_count_mismatch.rs:11:9
+   |
+11 | #[assay(matrix = [a: [1, 2]])]
+   |         ^^^^^^

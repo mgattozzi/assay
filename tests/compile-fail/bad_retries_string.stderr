@@ -1,4 +1,4 @@
-error: expected integer after `retries =`
+error: expected number here
        help: use `retries = 3`
   --> tests/compile-fail/bad_retries_string.rs:11:19
    |

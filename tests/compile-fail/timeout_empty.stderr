@@ -1,0 +1,6 @@
+error: duration cannot be empty
+       help: use `timeout = "30s"` or `timeout = "500ms"`
+  --> tests/compile-fail/timeout_empty.rs:11:19
+   |
+11 | #[assay(timeout = "")]
+   |                   ^^

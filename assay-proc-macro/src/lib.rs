@@ -7,12 +7,13 @@
  */
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
   parse::{Parse, ParseStream},
   parse_macro_input,
   punctuated::Punctuated,
+  spanned::Spanned,
   Expr, ExprArray, ExprLit, ExprTuple, ExprUnary, FnArg, Ident, ItemFn, Lit, Pat, Result, Token,
   UnOp,
 };
@@ -134,12 +135,35 @@ fn cartesian_product<T: Clone>(lists: &[Vec<T>]) -> Vec<Vec<T>> {
   result
 }
 
+/// Error type for duration parsing, providing structured error information.
+enum DurationError {
+  Empty,
+  MissingNumber,
+  InvalidNumber(String),
+  UnknownUnit(String),
+  Overflow,
+  Zero,
+}
+
+impl DurationError {
+  fn message(&self) -> String {
+    match self {
+      Self::Empty => "duration cannot be empty".into(),
+      Self::MissingNumber => "duration must start with a number".into(),
+      Self::InvalidNumber(n) => format!("invalid number: '{}'", n),
+      Self::UnknownUnit(u) => format!("unknown unit: '{}'\nvalid units: s, ms, m", u),
+      Self::Overflow => "duration value too large".into(),
+      Self::Zero => "duration cannot be zero".into(),
+    }
+  }
+}
+
 /// Parse a duration string like "30s", "500ms", "2m" into milliseconds.
-fn parse_duration(s: &str) -> std::result::Result<u64, String> {
+fn parse_duration(s: &str) -> std::result::Result<u64, DurationError> {
   let s = s.trim();
 
   if s.is_empty() {
-    return Err("duration cannot be empty".to_string());
+    return Err(DurationError::Empty);
   }
 
   // Try to split into number and unit
@@ -150,30 +174,25 @@ fn parse_duration(s: &str) -> std::result::Result<u64, String> {
   };
 
   if num_str.is_empty() {
-    return Err(format!("invalid duration '{}': missing number", s));
+    return Err(DurationError::MissingNumber);
   }
 
   let num: u64 = num_str
     .parse()
-    .map_err(|_| format!("invalid number in duration: '{}'", num_str))?;
+    .map_err(|_| DurationError::InvalidNumber(num_str.to_string()))?;
 
   let millis = match unit.to_lowercase().as_str() {
     "s" | "sec" | "secs" | "second" | "seconds" => num.checked_mul(MILLIS_PER_SECOND),
     "ms" | "milli" | "millis" | "millisecond" | "milliseconds" => Some(num),
     "m" | "min" | "mins" | "minute" | "minutes" => num.checked_mul(MILLIS_PER_MINUTE),
     "" => num.checked_mul(MILLIS_PER_SECOND), // bare number = seconds
-    other => {
-      return Err(format!(
-        "unknown duration unit: '{}'\nvalid units: s, ms, m",
-        other
-      ))
-    }
+    other => return Err(DurationError::UnknownUnit(other.to_string())),
   };
 
-  let millis = millis.ok_or_else(|| "timeout duration overflow".to_string())?;
+  let millis = millis.ok_or(DurationError::Overflow)?;
 
   if millis == 0 {
-    return Err("timeout cannot be zero".to_string());
+    return Err(DurationError::Zero);
   }
 
   Ok(millis)
@@ -355,6 +374,8 @@ struct AssayAttribute {
   cases: Option<Vec<NamedCase>>,
   /// Matrix parameters for combinatorial testing
   matrix: Option<Vec<MatrixParam>>,
+  /// Span of the `matrix` keyword for better error messages
+  matrix_span: Option<Span>,
 }
 
 impl Parse for AssayAttribute {
@@ -367,6 +388,7 @@ impl Parse for AssayAttribute {
     let mut retries = None;
     let mut cases = None;
     let mut matrix = None;
+    let mut matrix_span = None;
 
     while input.peek(Ident) || {
       if input.peek(Token![,]) {
@@ -387,11 +409,14 @@ impl Parse for AssayAttribute {
           input.parse::<Token![=]>().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected `=` after `include`\nhelp: use `include = [\"file.txt\"]`",
+              "expected `=` here\nhelp: use `include = [\"file.txt\"]`",
             )
           })?;
           let array: ExprArray = input.parse().map_err(|e| {
-            syn::Error::new(e.span(), "expected array after `include =`\nhelp: use `include = [\"file.txt\", \"other.txt\"]`")
+            syn::Error::new(
+              e.span(),
+              "expected `[...]` here\nhelp: use `include = [\"file.txt\", \"other.txt\"]`",
+            )
           })?;
 
           if array.elems.is_empty() {
@@ -471,13 +496,13 @@ impl Parse for AssayAttribute {
           input.parse::<Token![=]>().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected `=` after `env`\nhelp: use `env = [(\"KEY\", \"value\")]`",
+              "expected `=` here\nhelp: use `env = [(\"KEY\", \"value\")]`",
             )
           })?;
           let array: ExprArray = input.parse().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected array after `env =`\nhelp: use `env = [(\"KEY\", \"value\")]`",
+              "expected `[...]` here\nhelp: use `env = [(\"KEY\", \"value\")]`",
             )
           })?;
 
@@ -557,10 +582,7 @@ impl Parse for AssayAttribute {
           input.parse::<Token![=]>().map_err(|e| {
             syn::Error::new(
               e.span(),
-              format!(
-                "expected `=` after `{}`\nhelp: use `{} = my_function`",
-                val, val
-              ),
+              format!("expected `=` here\nhelp: use `{} = my_function()`", val),
             )
           })?;
           let x = input.parse()?;
@@ -579,26 +601,23 @@ impl Parse for AssayAttribute {
           }
 
           input.parse::<Token![=]>().map_err(|e| {
-            syn::Error::new(
-              e.span(),
-              "expected `=` after `timeout`\nhelp: use `timeout = \"30s\"`",
-            )
+            syn::Error::new(e.span(), "expected `=` here\nhelp: use `timeout = \"30s\"`")
           })?;
 
           let lit: syn::LitStr = input.parse().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected string after `timeout =`\nhelp: use `timeout = \"30s\"` or `timeout = \"500ms\"`",
+              "expected duration string here\nhelp: use `timeout = \"30s\"` or `timeout = \"500ms\"`",
             )
           })?;
 
           let duration_str = lit.value();
-          let millis = parse_duration(&duration_str).map_err(|msg| {
+          let millis = parse_duration(&duration_str).map_err(|err| {
             syn::Error::new_spanned(
               &lit,
               format!(
                 "{}\nhelp: use `timeout = \"30s\"` or `timeout = \"500ms\"`",
-                msg
+                err.message()
               ),
             )
           })?;
@@ -613,18 +632,12 @@ impl Parse for AssayAttribute {
             ));
           }
 
-          input.parse::<Token![=]>().map_err(|e| {
-            syn::Error::new(
-              e.span(),
-              "expected `=` after `retries`\nhelp: use `retries = 3`",
-            )
-          })?;
+          input
+            .parse::<Token![=]>()
+            .map_err(|e| syn::Error::new(e.span(), "expected `=` here\nhelp: use `retries = 3`"))?;
 
           let lit: syn::LitInt = input.parse().map_err(|e| {
-            syn::Error::new(
-              e.span(),
-              "expected integer after `retries =`\nhelp: use `retries = 3`",
-            )
+            syn::Error::new(e.span(), "expected number here\nhelp: use `retries = 3`")
           })?;
 
           let count: u32 = lit.base10_parse().map_err(|_| {
@@ -660,7 +673,7 @@ impl Parse for AssayAttribute {
           input.parse::<Token![=]>().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected `=` after `cases`\nhelp: use `cases = [name: (arg1, arg2)]`",
+              "expected `=` here\nhelp: use `cases = [name: (arg1, arg2)]`",
             )
           })?;
 
@@ -674,21 +687,21 @@ impl Parse for AssayAttribute {
             let case_name: Ident = content.parse().map_err(|e| {
               syn::Error::new(
                 e.span(),
-                "expected case name\nhelp: use `cases = [my_case: (arg1, arg2)]`",
+                "expected identifier here\nhelp: use `cases = [my_case: (arg1, arg2)]`",
               )
             })?;
 
             content.parse::<Token![:]>().map_err(|e| {
               syn::Error::new(
                 e.span(),
-                "expected `:` after case name\nhelp: use `cases = [my_case: (arg1, arg2)]`",
+                "expected `:` here\nhelp: use `cases = [my_case: (arg1, arg2)]`",
               )
             })?;
 
             let args: ExprTuple = content.parse().map_err(|e| {
               syn::Error::new(
                 e.span(),
-                "expected tuple of arguments\nhelp: use `cases = [my_case: (arg1, arg2)]`",
+                "expected `(...)` here\nhelp: use `cases = [my_case: (arg1, arg2)]`",
               )
             })?;
 
@@ -737,7 +750,7 @@ impl Parse for AssayAttribute {
           input.parse::<Token![=]>().map_err(|e| {
             syn::Error::new(
               e.span(),
-              "expected `=` after `matrix`\nhelp: use `matrix = [param: [val1, val2]]`",
+              "expected `=` here\nhelp: use `matrix = [param: [val1, val2]]`",
             )
           })?;
 
@@ -751,14 +764,14 @@ impl Parse for AssayAttribute {
             let param_name: Ident = content.parse().map_err(|e| {
               syn::Error::new(
                 e.span(),
-                "expected parameter name\nhelp: use `matrix = [param: [val1, val2]]`",
+                "expected identifier here\nhelp: use `matrix = [param: [val1, val2]]`",
               )
             })?;
 
             content.parse::<Token![:]>().map_err(|e| {
               syn::Error::new(
                 e.span(),
-                "expected `:` after parameter name\nhelp: use `matrix = [param: [val1, val2]]`",
+                "expected `:` here\nhelp: use `matrix = [param: [val1, val2]]`",
               )
             })?;
 
@@ -806,6 +819,7 @@ impl Parse for AssayAttribute {
           }
 
           matrix = Some(params);
+          matrix_span = Some(ident.span());
         }
         unknown => {
           // Check if user is trying to use standard test attributes inside #[assay(...)]
@@ -866,6 +880,7 @@ impl Parse for AssayAttribute {
       retries,
       cases,
       matrix,
+      matrix_span,
     })
   }
 }
@@ -1134,8 +1149,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     let matrix_param_names: Vec<_> = matrix_params.iter().map(|p| &p.name).collect();
 
     if param_names.len() != matrix_param_names.len() {
-      return syn::Error::new_spanned(
-        &sig,
+      let span = attr.matrix_span.unwrap_or_else(|| sig.span());
+      return syn::Error::new(
+        span,
         format!(
           "matrix has {} parameters but function has {}\nhelp: matrix parameters must match function parameters",
           matrix_param_names.len(),
