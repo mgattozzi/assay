@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [ main, auto, canary ]
+    branches: [main, auto, canary]
   pull_request:
     branches:
       - main
@@ -14,106 +14,50 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          # By default actions/checkout checks out a merge commit. Check out the PR head instead.
-          # https://github.com/actions/checkout#checkout-pull-request-head-commit-instead-of-merge-commit
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
+      - uses: Swatinem/rust-cache@v2
       - name: Lint (clippy) async-std
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --no-default-features --features async-std-runtime --all-targets
+        run: cargo clippy --no-default-features --features async-std-runtime --all-targets
       - name: Lint (clippy) tokio
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --no-default-features --features async-tokio-runtime --all-targets
+        run: cargo clippy --no-default-features --features async-tokio-runtime --all-targets
       - name: Lint (clippy) default
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all-targets
+        run: cargo clippy --all-targets
       - name: Lint (rustfmt)
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --check
+        run: cargo fmt --check
 
   build:
     name: Build and test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-        rust-version: [ stable ]
+        os: [ubuntu-latest, macos-latest, windows-latest]
       fail-fast: false
     env:
       RUSTFLAGS: -D warnings
     steps:
-      # Checkout the code
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ matrix.rust-version }}
-          override: true
-      - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
-      # cargo build
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Build all targets with default features
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all-targets
+        run: cargo build --all-targets
       - name: Build all targets with async-std
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all-targets --no-default-features --features async-std-runtime
+        run: cargo build --all-targets --no-default-features --features async-std-runtime
       - name: Build all targets with tokio
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all-targets --no-default-features --features async-tokio-runtime
+        run: cargo build --all-targets --no-default-features --features async-tokio-runtime
       - name: Test async-std with cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace --no-default-features --features async-std-runtime
+        run: cargo test --workspace --no-default-features --features async-std-runtime
       - name: Test tokio with cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace --no-default-features --features async-tokio-runtime
+        run: cargo test --workspace --no-default-features --features async-tokio-runtime
       - name: Test defaults with cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace
-      # cargo nextest
-      - name: Install nextest from crates.io
-        uses: baptiste0928/cargo-install@v1
-        with:
-          crate: cargo-nextest
-      - name: Test async-std with nextest from crates.io
-        uses: actions-rs/cargo@v1
-        with:
-          command: nextest
-          args: run --no-default-features --features async-std-runtime
-      - name: Test tokio with nextest from crates.io
-        uses: actions-rs/cargo@v1
-        with:
-          command: nextest
-          args: run --no-default-features --features async-tokio-runtime
-      - name: Test defaults with nextest from crates.io
-        uses: actions-rs/cargo@v1
-        with:
-          command: nextest
-          args: run
+        run: cargo test --workspace
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - name: Test async-std with nextest
+        run: cargo nextest run --no-default-features --features async-std-runtime
+      - name: Test tokio with nextest
+        run: cargo nextest run --no-default-features --features async-tokio-runtime
+      - name: Test defaults with nextest
+        run: cargo nextest run
