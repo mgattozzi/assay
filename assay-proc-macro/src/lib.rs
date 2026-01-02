@@ -779,7 +779,7 @@ impl Parse for AssayAttribute {
             syn::bracketed!(values_content in content);
 
             let values: Punctuated<Expr, Token![,]> =
-              values_content.parse_terminated(Expr::parse)?;
+              values_content.parse_terminated(Expr::parse, Token![,])?;
             let values: Vec<Expr> = values.into_iter().collect();
 
             if values.is_empty() {
@@ -964,17 +964,17 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let func = parse_macro_input!(item as ItemFn);
 
   // Detect standard test attributes from the function
-  let has_ignore = func.attrs.iter().any(|attr| attr.path.is_ident("ignore"));
+  let has_ignore = func.attrs.iter().any(|attr| attr.path().is_ident("ignore"));
   let has_should_panic = func
     .attrs
     .iter()
-    .any(|attr| attr.path.is_ident("should_panic"));
+    .any(|attr| attr.path().is_ident("should_panic"));
 
   // Find the should_panic attribute to preserve its arguments (e.g., expected = "...")
   let should_panic_attr = func
     .attrs
     .iter()
-    .find(|attr| attr.path.is_ident("should_panic"))
+    .find(|attr| attr.path().is_ident("should_panic"))
     .cloned();
 
   // Preserve non-conflicting attributes from the original function
@@ -983,9 +983,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into_iter()
     .filter(|attr| {
       // Skip attributes that we handle specially
-      !attr.path.is_ident("test")
-        && !attr.path.is_ident("ignore")
-        && !attr.path.is_ident("should_panic")
+      !attr.path().is_ident("test")
+        && !attr.path().is_ident("ignore")
+        && !attr.path().is_ident("should_panic")
     })
     .collect();
 
