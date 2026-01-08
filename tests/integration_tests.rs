@@ -63,8 +63,24 @@ fn hash_map_comparison() {
 }
 
 #[assay]
+#[tokio::test]
 async fn async_func() {
   ReadyOnPoll.await;
+}
+
+// Test that async works without explicit executor attribute (uses futures-lite fallback)
+#[assay]
+async fn async_fallback_executor() {
+  // Simple future that resolves immediately
+  let result = async { 42 }.await;
+  assert_eq!(result, 42);
+}
+
+#[actix_rt::test]
+#[assay]
+async fn async_with_actix_rt() {
+  let result = async { "actix" }.await;
+  assert_eq!(result, "actix");
 }
 
 #[should_panic]
@@ -112,6 +128,7 @@ fn setup_teardown_test_2() {
   assert_eq!(fs::read_to_string("setup")?, "Value: 5");
 }
 
+#[allow(unreachable_code)]
 #[should_panic]
 #[assay(
   setup = setup_func_2(),
@@ -122,6 +139,7 @@ fn setup_teardown_test_2() {
   ],
   teardown = teardown_func(),
 )]
+#[tokio::test]
 async fn one_test_to_call_it_all() {
   ReadyOnPoll.await;
 
@@ -135,6 +153,7 @@ async fn one_test_to_call_it_all() {
   panic!();
 }
 
+#[allow(unreachable_code)]
 #[should_panic]
 #[assay(
   setup = setup_func(5)?,
@@ -145,6 +164,7 @@ async fn one_test_to_call_it_all() {
   teardown = teardown_func(),
   include = ["Cargo.toml", "src/lib.rs"],
 )]
+#[tokio::test]
 async fn one_test_to_call_it_all_2() {
   ReadyOnPoll.await;
 
@@ -170,6 +190,7 @@ fn timeout_millis_passes() {
 }
 
 #[assay(timeout = "5s")]
+#[tokio::test]
 async fn async_timeout_passes() {
   ReadyOnPoll.await;
 }
@@ -196,6 +217,7 @@ fn retries_with_single_retry() {
 }
 
 #[assay(retries = 2)]
+#[tokio::test]
 async fn async_retries_test() {
   ReadyOnPoll.await;
 }

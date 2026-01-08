@@ -36,6 +36,34 @@ const VALID_ATTRIBUTES: &[&str] = &[
   "include", "env", "setup", "teardown", "timeout", "retries", "cases", "matrix",
 ];
 
+/// Known async executor test attributes that we should defer to
+const KNOWN_EXECUTOR_ATTRS: &[&[&str]] = &[
+  &["tokio", "test"],
+  &["async_std", "test"],
+  &["actix_rt", "test"],
+  &["actix_web", "test"],
+  &["smol_potat", "test"],
+  &["test_log", "test"],
+];
+
+/// Check if an attribute path matches a known executor attribute.
+fn is_executor_attr(attr: &syn::Attribute) -> bool {
+  let path = attr.path();
+  for pattern in KNOWN_EXECUTOR_ATTRS {
+    if path.segments.len() == pattern.len() {
+      let matches = path
+        .segments
+        .iter()
+        .zip(pattern.iter())
+        .all(|(seg, expected)| seg.ident == expected);
+      if matches {
+        return true;
+      }
+    }
+  }
+  false
+}
+
 // ============================================================
 // Helper Structs for Parsing
 // ============================================================
@@ -231,6 +259,7 @@ fn quote_subprocess_with_timeout(
       .arg("--exact")
       #subprocess_extra_args
       .env(#ENV_ASSAY_SPLIT, "1")
+      .current_dir(&__assay_original_cwd)
       .stdout(std::process::Stdio::piped())
       .stderr(std::process::Stdio::piped())
       .spawn()
@@ -263,6 +292,7 @@ fn quote_subprocess_no_timeout(subprocess_extra_args: &TokenStream2) -> TokenStr
       .arg("--exact")
       #subprocess_extra_args
       .env(#ENV_ASSAY_SPLIT, "1")
+      .current_dir(&__assay_original_cwd)
       .output()
       .expect("executed a subprocess");
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -994,15 +1024,23 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
   let name = sig.ident.clone();
   let asyncness = sig.asyncness.take();
   let block = func.block;
+
+  // Check if there's an executor attribute like #[tokio::test]
+  let has_executor_attr = other_attrs.iter().any(is_executor_attr);
+
   let body = if asyncness.is_some() {
-    #[cfg(not(feature = "async"))]
-    compile_error!("You cannot use the async functionality in `assay` without specifiying a runtime. This error is occurring because you turned off the default features. Possible feature values are:\n- async-tokio-runtime\n- async-std-runtime");
-    quote! {
-      async fn inner_async() -> assay::Result<()> {
-        #block
-        Ok(())
+    if has_executor_attr {
+      // External executor will handle async - just run the block directly
+      quote! { #block }
+    } else {
+      // Use our built-in executor as fallback
+      quote! {
+        async fn inner_async() -> assay::Result<()> {
+          #block
+          Ok(())
+        }
+        assay::async_runtime::block_on(inner_async())?;
       }
-      assay::async_runtime::Runtime::block_on(inner_async())??;
     }
   } else {
     quote! { #block }
@@ -1105,6 +1143,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
       #should_panic
       #ignore
       fn #test_fn_name() #ret_type {
+        // Get stable cwd from process start for subprocess spawning
+        let __assay_original_cwd = assay::original_cwd();
+
         #[allow(unreachable_code)]
         fn child() -> assay::Result<()> {
           use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
@@ -1209,6 +1250,48 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
       .collect();
 
     TokenStream::from(quote! { #(#tests)* })
+  } else if has_executor_attr && asyncness.is_some() {
+    // Async test with external executor (e.g., #[tokio::test])
+    // Run setup/body/teardown inline in an async context, no subprocess isolation
+    let block_inner = &block.stmts;
+
+    let expanded = if has_should_panic {
+      // For should_panic tests, wrap body in Result-returning async block and unwrap
+      // This allows ? operator while still triggering the expected panic
+      quote! {
+        #(#other_attrs)*
+        #should_panic
+        #ignore
+        #vis async fn #name() {
+          use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
+          let __assay_result: assay::Result<()> = async {
+            #include
+            #setup
+            #env
+            #(#block_inner)*
+            #teardown
+            Ok(())
+          }.await;
+          __assay_result.unwrap();
+        }
+      }
+    } else {
+      quote! {
+        #(#other_attrs)*
+        #ignore
+        #vis async fn #name() #ret_type {
+          use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};
+          #include
+          #setup
+          #env
+          #(#block_inner)*
+          #teardown
+          #ret
+        }
+      }
+    };
+
+    TokenStream::from(expanded)
   } else {
     // No parameterization - generate single test as before
     let test_name_expr = quote! {
@@ -1237,6 +1320,9 @@ pub fn assay(attr: TokenStream, item: TokenStream) -> TokenStream {
       #should_panic
       #ignore
       #fn_sig {
+        // Get stable cwd from process start for subprocess spawning
+        let __assay_original_cwd = assay::original_cwd();
+
         #[allow(unreachable_code)]
         fn child() -> assay::Result<()> {
           use assay::{assert_eq, assert_eq_sorted, assert_ne, net::TestAddress};

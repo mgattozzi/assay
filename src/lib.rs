@@ -25,6 +25,20 @@ use std::{
 };
 use tempfile::{Builder, TempDir};
 
+/// The original working directory captured at process start.
+/// This is used to provide a stable cwd for subprocess spawning,
+/// avoiding race conditions when parallel tests change the process cwd.
+static ORIGINAL_CWD: OnceLock<PathBuf> = OnceLock::new();
+
+/// Get the original working directory from process start.
+/// This is stable even when tests change the current working directory.
+#[doc(hidden)]
+pub fn original_cwd() -> &'static PathBuf {
+  ORIGINAL_CWD.get_or_init(|| {
+    env::current_dir().expect("failed to get original working directory at process start")
+  })
+}
+
 /// A convenient Result type that uses `eyre::Report` as the error type.
 ///
 /// This allows using the `?` operator in tests without verbose error type annotations.
@@ -166,21 +180,23 @@ impl PrivateFS {
   }
 }
 
+impl Drop for PrivateFS {
+  fn drop(&mut self) {
+    // Restore the original working directory before the temp directory is cleaned up.
+    // This is important when tests run inline (e.g., with external async executors)
+    // rather than in subprocesses, as they share the process's working directory.
+    let _ = env::set_current_dir(&self.ran_from);
+  }
+}
+
 // Async functionality
 #[doc(hidden)]
-#[cfg(any(feature = "async-tokio-runtime", feature = "async-std-runtime"))]
 pub mod async_runtime {
-  use super::Result;
   use std::future::Future;
-  pub struct Runtime;
-  impl Runtime {
-    #[cfg(feature = "async-tokio-runtime")]
-    pub fn block_on<F: Future>(fut: F) -> Result<F::Output> {
-      Ok(tokio::runtime::Runtime::new()?.block_on(fut))
-    }
-    #[cfg(feature = "async-std-runtime")]
-    pub fn block_on<F: Future>(fut: F) -> Result<F::Output> {
-      Ok(async_std::task::block_on(fut))
-    }
+
+  /// Block on a future using futures-lite's simple executor.
+  /// This is used as a fallback when no external executor attribute is present.
+  pub fn block_on<F: Future>(fut: F) -> F::Output {
+    futures_lite::future::block_on(fut)
   }
 }

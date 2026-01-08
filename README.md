@@ -69,23 +69,6 @@ Then importing the macro for your tests:
 use assay::assay;
 ```
 
-This setup will by default turn on the ability for `async` tests using `tokio`, if you wish to turn
-it off to cut down on dependencies then you can do the following:
-
-```toml
-[dev-dependencies]
-assay = {version = "0.1.0", no-default-features = true }
-```
-
-`assay` also supports using the `async-std` runtime if you prefer instead of
-`tokio` which can be enabled as such:
-
-```toml
-[dev-dependencies]
-assay = {version = "0.1.0", no-default-features = true, features =
-"async-std-runtime" }
-```
-
 ## Basic Usage & Automatic Niceties
 
 Just putting on the `#[assay]` attribute is the easiest way to get started:
@@ -232,33 +215,41 @@ fn slow_test() {
 }
 ```
 
-## `async` tests
-If you want your tests to run `async` code all you need to do is specify that the
-test is `async`. `assay` defaults to using `tokio` as the executor, but can use `async-std`.
-Note: you cannot use the `async` functionality if `no-default-features` is enabled in your
-`Cargo.toml` with no specified runtime.
+## Async Tests
+
+Assay works with any async executor. Simply stack your executor's test attribute with `#[assay]`:
 
 ```rust
 use assay::assay;
-use std::{
-  pin::Pin,
-  future::Future,
-  task::{Poll, Context},
-};
 
+#[tokio::test]
 #[assay]
-async fn async_func() {
-  ReadyOnPoll.await;
-}
-
-struct ReadyOnPoll;
-impl Future for ReadyOnPoll {
-  type Output = ();
-  fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
-    Poll::Ready(())
-  }
+async fn my_async_test() {
+    let result = some_async_operation().await?;
+    assert_eq!(result, expected);
 }
 ```
+
+Supported executors include:
+- `#[tokio::test]`
+- `#[actix_rt::test]`
+- `#[async_std::test]`
+- `#[smol_potat::test]`
+- And any other executor that provides a test attribute
+
+For simple futures that don't require a full runtime (no I/O, timers, or spawning), you can use `#[assay]` alone:
+
+```rust
+use assay::assay;
+
+#[assay]
+async fn simple_async_test() {
+    let value = std::future::ready(42).await;
+    assert_eq!(value, 42);
+}
+```
+
+This uses a lightweight built-in executor suitable for basic async operations.
 
 ## Setup and Teardown Functions
 
@@ -463,6 +454,7 @@ use std::{
   task::{Poll, Context},
 };
 
+#[tokio::test]
 #[should_panic]
 #[assay(
   setup = setup_func(5)?,
